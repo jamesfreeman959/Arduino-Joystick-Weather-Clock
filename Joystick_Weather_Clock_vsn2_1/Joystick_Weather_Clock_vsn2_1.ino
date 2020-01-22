@@ -1,4 +1,12 @@
+/* Libraries used:
+ *  
+ * Adafruit_BMP280_Library v 2.0.1
+ * DHT_sensor_library v1.3.8
+ */
+
 #include <Adafruit_BMP280.h>
+#include <DHT.h>
+#include <DHT_U.h>
 
 /***********************************************************
 Joystick controlled Clock using OLED Display
@@ -8,7 +16,6 @@ Version History:
 Sept 2015 - first version
 February 2017 - version 2.0 added Humidity Sensor
 February 2017 - version 2.1 improved humidity function and corrected some code
-January 2020 - version 2.2 - James Freeman - altered code to support BMP280 in place of BMP085/BMP180. Also rotated display through 180 degrees
 
 Sketch updated February to include a Humidity Sensor DHT11 or DHT22
 A DS3231 RTC Chip should be used instead of the DS1307 to give better time stability
@@ -17,7 +24,7 @@ The GitHub page contains all the libraries used with this project
 
 This sketch uses an Arduino Mega to provide more memory
 
-The program uses 75% of dynamic memory.
+The program uses 73% of dynamic memory.
 
 OLED Analog Clock using U8GLIB Library
 
@@ -109,7 +116,7 @@ Small LED (green) to show backup data being saved to SD Card
 
 // Add libraries
 //  #include "BMP085.h"  // pressure sensor - this old library seems to work with the modern BMP280 (TBD - currently reports ok but no valid pressure data) - but has a hard coded address on the I2C bus of 0x77 - my sensor is 0x76 (found via I2C Scanner)
-  #include <dht11.h> // Humidity Sensor
+//  #include <dht11.h> // Humidity Sensor
   #include "I2Cdev.h" // needed with BMP085.h
   #include "RTClib.h"  // Real time clock
   #include <SD.h>  //SD Card
@@ -137,10 +144,14 @@ Small LED (green) to show backup data being saved to SD Card
   boolean errorHardware3 = false; // Humidity Sensor
 //
 // setup DHT11 Humidity Sensor
-  dht11 DHT11;
-  #define DHT11PIN 12
-  int checkDHT11; // used to confirm reading OK
-  int dewPointValue = 0;
+  #define DHTTYPE DHT11
+  #define DHTPIN 12
+  DHT dht(DHTPIN, DHTTYPE);
+  
+  //#define DHT11PIN 12
+  //int checkDHT11; // used to confirm reading OK
+  double dewPointValue = 0;
+  float heatIndexValue = 0.0;
   const char* greetingHumidity = "";
   boolean humidityUpdate = false; // shows if humidity was manually updated
   float humidityValue = 0.0;
@@ -158,7 +169,7 @@ Small LED (green) to show backup data being saved to SD Card
   String thisTime = ""; 
   String thisWeekday ="";
 //
-// setup BMP180
+// setup BMP280
   //BMP085 barometer;
   Adafruit_BMP280 barometer;
   boolean grabFlag = false; // used to ensure only 1 reading is taken
@@ -169,7 +180,8 @@ Small LED (green) to show backup data being saved to SD Card
   double localTempF = 0.00; // temp in Farenheit
   boolean pascal = false; // flag to show if pascals should be shown
   float pressure;
-  boolean showC = true;  // if false show temp in Farenheit
+  //boolean showC = true;  // if false show temp in Farenheit
+  byte showC = 0;
   int showData = 1; // used to show data screen 1 = now, 2 = -24hrs, 3 = -48hrs
   boolean switchForecast = false; // if false then current forecast shown
   int temperature;
@@ -379,8 +391,9 @@ void setup(void) {
   //
   pinMode(buzzerPin, OUTPUT); // output
   //
-  u8g.firstPage();  
-    do {
+  u8g.firstPage(); 
+  u8g.setRot180();  // Fix if mounting the screen upside down - comment out or delete if not.
+  do {
       splash(); 
     } while( u8g.nextPage() );
   //  
@@ -390,7 +403,7 @@ void setup(void) {
   // and upload this sketch again
   //RTC.adjust(DateTime(__DATE__, __TIME__));
   //
-  //BP180
+  //BMP280
   // initialize device
   Serial.println(F("Initializing I2C devices..."));
   //barometer.initialize();
@@ -414,7 +427,8 @@ void setup(void) {
     errorHardware2 = true;
  }
   //
-  //check presence of DHTll
+  //check presence of DHT11
+  dht.begin();
   getHumidity(); // check the Humidity sensor
   if(errorHardware3 == false){
     Serial.println("DHT11 reading OK");
@@ -544,7 +558,6 @@ void loop() {
     case 0:
       // draw an analog screen
       u8g.firstPage();
-      u8g.setRot180();  // Fix if mounting the screen upside down - comment out or delete if not.
       do {
         drawAnalog(); 
       } while( u8g.nextPage() );
@@ -1382,15 +1395,20 @@ void getForecast(){
 //
 void drawTemperature(){
   // displays local temperature
-  u8g.setFont(u8g_font_profont15);
-  u8g.drawStr(25,10, "Temperature:");
   //
-  if(showC == false){
+  if(showC == 1){
+    u8g.setFont(u8g_font_profont15);
+    u8g.drawStr(25,10, "Temperature:");
     localTempF = localTemp * 1.8 + 32.0; 
     thisTemperature = String(int(localTempF)) + "\260F";  // displays degree symbol 
-  }
-  else{
+  } else if (showC == 0) {
+    u8g.setFont(u8g_font_profont15);
+    u8g.drawStr(25,10, "Temperature:");
     thisTemperature = String(int(localTemp)) + "\260C"; // displays degree symbol
+  } else if (showC == 2) {
+    u8g.setFont(u8g_font_profont15);
+    u8g.drawStr(25,10, "Heat Index:");
+    thisTemperature = String(int(heatIndexValue)) + "\260C";
   }
   const char* newTemperature = (const char*) thisTemperature.c_str();
   u8g.setFont(u8g_font_profont29);    
@@ -2116,7 +2134,11 @@ void joySwitchISR(){
     }
     //
     if(displayScreen == 7){
-      showC = ! showC; // switch between C and F
+      if (showC == 2) {
+        showC = 0;
+      } else {
+        showC++; // switch between C and F
+      }
     }    
     // 
     if(displayScreen == 8 || displayScreen  == 15 || displayScreen == 16){
@@ -2201,23 +2223,64 @@ void joySwitchISR(){
 /********************************************************/
 void getHumidity(){
   // reads the DHT11, checks thst Sensor reading is OK. If not then returns errorHardware3 = true
-   checkDHT11 = DHT11.read(DHT11PIN);
+   //checkDHT11 = DHT11.read(DHT11PIN);
    humidityValue = 0; // reset value
    dewPointValue = 0;
-   switch (checkDHT11)
-   {
-     case 0: errorHardware3 = false; break;
-     case -1: errorHardware3 = false; break; // -1 = Checksum error - seeing lots of these on my board in spite of apparent good data coming back - I think this is to do with my wiring crossing over paths - we'll try and fix in due course....
-     // ^^^^ When wiring is fixed, this should be "true" to prevent the code from running if checksum errors are coming back from the DHT11.
-     case -2: errorHardware3 = true; break;
-     default: errorHardware3 = true; break;
+   // Code taken from DHTtester
+   // Reading temperature or humidity takes about 250 milliseconds!
+   // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+   humidityValue = dht.readHumidity();
+   // Read temperature as Celsius (the default)
+   float t = dht.readTemperature(); 
+   // Read temperature as Fahrenheit (isFahrenheit = true)
+   //float f = dht.readTemperature(true);
+
+   if (isnan(humidityValue) || isnan(t)) { // || isnan(f)) {
+     //Serial.println(F("Failed to read from DHT sensor!"));
+     errorHardware3 = true;
+     return;
    }
-   Serial.print(F("DHT11 return value was: "));
-   Serial.println(checkDHT11);
+   //switch (checkDHT11)
+   //{
+   //  case 0: errorHardware3 = false; break;
+   //  case -1: errorHardware3 = false; break; // -1 = Checksum error - seeing lots of these on my board in spite of apparent good data coming back - I think this is to do with my wiring crossing over paths - we'll try and fix in due course....
+   //  // ^^^^ When wiring is fixed, this should be "true" to prevent the code from running if checksum errors are coming back from the DHT11.
+   //  case -2: errorHardware3 = true; break;
+   //  default: errorHardware3 = true; break;
+   //}
+   //Serial.print(F("DHT11 return value was: "));
+   //Serial.println(h);
    if(errorHardware3 == false){
-    humidityValue = DHT11.humidity; // only return a value if reading was good
-    dewPointValue = DHT11.dewPoint();
+    // only return a value if reading was good
+    dewPointValue = dewPoint(t, humidityValue);
+    heatIndexValue = dht.computeHeatIndex(t, humidityValue, false);
    }
+}
+
+/********************************************************/
+// John Main added dewpoint code from : http://playground.arduino.cc/main/DHT11Lib
+// Also added DegC output for Heat Index.
+// dewPoint function NOAA
+// reference (1) : http://wahiduddin.net/calc/density_algorithms.htm
+// reference (2) : http://www.colorado.edu/geography/weather_station/Geog_site/about.htm
+//
+// Found at: https://www.best-microcontroller-projects.com/dht22.html
+double dewPoint(double celsius, double humidity)
+{
+  // (1) Saturation Vapor Pressure = ESGG(T)
+  double RATIO = 373.15 / (273.15 + celsius);
+  double RHS = -7.90298 * (RATIO - 1);
+  RHS += 5.02808 * log10(RATIO);
+  RHS += -1.3816e-7 * (pow(10, (11.344 * (1 - 1 / RATIO ))) - 1) ;
+  RHS += 8.1328e-3 * (pow(10, (-3.49149 * (RATIO - 1))) - 1) ;
+  RHS += log10(1013.246);
+
+  // factor -3 is to adjust units - Vapor Pressure SVP * humidity
+  double VP = pow(10, RHS - 3) * humidity;
+
+  // (2) DEWPOINT = F(Vapor Pressure)
+  double T = log(VP / 0.61078); // temp var
+  return (241.88 * T) / (17.558 - T);
 }
 
 /********************************************************/
@@ -2235,13 +2298,13 @@ void splash(){
   u8g.drawStr(7,10, "Joystick Controlled");  
   u8g.drawStr(21,30, "Weather Station");
   u8g.drawLine(0,40,128,40); 
-  u8g.drawStr(24,55, "by Chris Rouse");    
+  u8g.drawStr(24,55, "by James Freeman");    
 }
 /********************************************************/
 void resetFlags(){
   // reset flags when joystick moves left or right
   showData = 1; // reset the plot screens when we move away
-  showC = true; // reset to show Centigrade when we move away  
+  //showC = true; // reset to show Centigrade when we move away  
   buttonFlag == false; //stop timers working when we leave screen 
   switchForecast = false; // reset to show current forecast 
   moonName = false; // reset the moon screen to graphic display
