@@ -18,6 +18,7 @@ void setup () {
     Serial.println("setting RTC to PC time");
     // following line sets the RTC to the date & time this sketch was compiled
     RTC.adjust(DateTime(__DATE__, __TIME__));
+    Serial.println("setting RTC to PC time1");
   
 }
 //

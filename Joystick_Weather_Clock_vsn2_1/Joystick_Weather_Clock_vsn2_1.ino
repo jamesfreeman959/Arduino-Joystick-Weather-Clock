@@ -1,3 +1,5 @@
+#include <Adafruit_BMP280.h>
+
 /***********************************************************
 Joystick controlled Clock using OLED Display
 by Chris Rouse August 2015
@@ -6,6 +8,7 @@ Version History:
 Sept 2015 - first version
 February 2017 - version 2.0 added Humidity Sensor
 February 2017 - version 2.1 improved humidity function and corrected some code
+January 2020 - version 2.2 - James Freeman - altered code to support BMP280 in place of BMP085/BMP180. Also rotated display through 180 degrees
 
 Sketch updated February to include a Humidity Sensor DHT11 or DHT22
 A DS3231 RTC Chip should be used instead of the DS1307 to give better time stability
@@ -14,7 +17,7 @@ The GitHub page contains all the libraries used with this project
 
 This sketch uses an Arduino Mega to provide more memory
 
-The program uses 73% of dynamic memory.
+The program uses 75% of dynamic memory.
 
 OLED Analog Clock using U8GLIB Library
 
@@ -105,7 +108,7 @@ Small LED (green) to show backup data being saved to SD Card
 ************************************************************/
 
 // Add libraries
-  #include "BMP085.h"  // pressure sensor
+//  #include "BMP085.h"  // pressure sensor - this old library seems to work with the modern BMP280 (TBD - currently reports ok but no valid pressure data) - but has a hard coded address on the I2C bus of 0x77 - my sensor is 0x76 (found via I2C Scanner)
   #include <dht11.h> // Humidity Sensor
   #include "I2Cdev.h" // needed with BMP085.h
   #include "RTClib.h"  // Real time clock
@@ -156,7 +159,8 @@ Small LED (green) to show backup data being saved to SD Card
   String thisWeekday ="";
 //
 // setup BMP180
-  BMP085 barometer;
+  //BMP085 barometer;
+  Adafruit_BMP280 barometer;
   boolean grabFlag = false; // used to ensure only 1 reading is taken
   float lastPressure1 = 0.00;
   float lastPressure2 = 0.00; 
@@ -389,7 +393,7 @@ void setup(void) {
   //BP180
   // initialize device
   Serial.println(F("Initializing I2C devices..."));
-  barometer.initialize();
+  //barometer.initialize();
   // verify connection
   Serial.println(F("Testing device connections..."));
   if (! RTC.isrunning()) {
@@ -402,13 +406,13 @@ void setup(void) {
    readingAge = now.minute();
    errorHardware1 = false;   
   }    
-  Serial.println(barometer.testConnection() ? "BMP085 connection successful" : "BMP085 connection failed");
-  if(barometer.testConnection()){
+  Serial.println(barometer.begin(0x76) ? "BMP280 connection successful" : "BMP280 connection failed");
+  if(barometer.begin(0x76)){
     errorHardware2 = false;
   }
   else{
     errorHardware2 = true;
-  }
+ }
   //
   //check presence of DHTll
   getHumidity(); // check the Humidity sensor
@@ -539,7 +543,8 @@ void loop() {
   switch (displayScreen){
     case 0:
       // draw an analog screen
-      u8g.firstPage();  
+      u8g.firstPage();
+      u8g.setRot180();  // Fix if mounting the screen upside down - comment out or delete if not.
       do {
         drawAnalog(); 
       } while( u8g.nextPage() );
@@ -2179,17 +2184,19 @@ void joySwitchISR(){
  void getPressure(){
    // reads both pressure and temperature
    // request temperature
-   barometer.setControl(BMP085_MODE_TEMPERATURE); 
+   //barometer.setControl(BMP085_MODE_TEMPERATURE); - old BMP085 lib only
    // wait appropriate time for conversion (4.5ms delay)
-   lastMicros = micros();
-   while (micros() - lastMicros < barometer.getMeasureDelayMicroseconds());
+   //lastMicros = micros();
+   //while (micros() - lastMicros < barometer.getMeasureDelayMicroseconds());
    // read calibrated temperature value in degrees Celsius
-   temperature = barometer.getTemperatureC();
+   //temperature = barometer.getTemperatureC();
+   temperature = barometer.readTemperature();
    // request pressure (3x oversampling mode, high detail, 23.5ms delay)
-   barometer.setControl(BMP085_MODE_PRESSURE_3);
-   while (micros() - lastMicros < barometer.getMeasureDelayMicroseconds());
+   //barometer.setControl(BMP085_MODE_PRESSURE_3);
+   //while (micros() - lastMicros < barometer.getMeasureDelayMicroseconds());
    // read calibrated pressure value in Pascals (Pa)
-   pressure = barometer.getPressure();
+   //pressure = barometer.getPressure();
+   pressure = barometer.readPressure();
  }
 /********************************************************/
 void getHumidity(){
@@ -2200,10 +2207,13 @@ void getHumidity(){
    switch (checkDHT11)
    {
      case 0: errorHardware3 = false; break;
-     case -1: errorHardware3 = true; break;
+     case -1: errorHardware3 = false; break; // -1 = Checksum error - seeing lots of these on my board in spite of apparent good data coming back - I think this is to do with my wiring crossing over paths - we'll try and fix in due course....
+     // ^^^^ When wiring is fixed, this should be "true" to prevent the code from running if checksum errors are coming back from the DHT11.
      case -2: errorHardware3 = true; break;
      default: errorHardware3 = true; break;
    }
+   Serial.print(F("DHT11 return value was: "));
+   Serial.println(checkDHT11);
    if(errorHardware3 == false){
     humidityValue = DHT11.humidity; // only return a value if reading was good
     dewPointValue = DHT11.dewPoint();
@@ -2379,4 +2389,3 @@ void buzzer(){
   delay(50);
 }
 /**********************************************************/
-

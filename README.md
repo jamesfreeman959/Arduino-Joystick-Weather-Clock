@@ -1,5 +1,15 @@
 # Arduino-Joystick-Weather-Clock
 
+Forked from rydepier's excellent work - updated in 2020:
+
+* BMP180 is now hard to find - I bought a BMP280 which offers the same functions, but had to make use of a different library, and change some of the library calls to match.
+* In my hardware construction, the OLED display ended up "upside-down". A single call to the u8g library rotates the display through 180 degrees. Could easily be modified for other rotations.
+* All other modules seem to be readily available - I used a DS1307 for the RTC.
+* Code structure has been modified to build on Arduino 1.8.10
+* A few test programs have been added to this folder, including an i2c scanner, as my BMP280 is at 0x76, and the modules default to 0x77.
+
+---
+
 This project was updated in Feb. 2017 to include a Humidity Sensor.
 
 This clock has 22 screens selected using a joystick. Everything from weather forecast to moon phase on OLED screen. The project requires an Arduino Mega, a real time clock (DS1307), a pressure sensor (BMP180), a Humidity Sensor (DHT 11), an active buzzer, an SD Card and a joystick with switch. Data is shown on 22 screens, selected using the joystick and an Anlo Clock, Digital Clock, Alarm and Timer are included.
