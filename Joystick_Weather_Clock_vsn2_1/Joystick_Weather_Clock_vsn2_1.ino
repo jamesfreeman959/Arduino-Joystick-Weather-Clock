@@ -6,6 +6,7 @@
  * SPI - v1.0 - supplied with Arduino 1.8.10
  * SD - v1.2.3 - supplied with Arduino 1.8.10 (From Sparkfun)
  * RTClib v1.3.3 - by Adafruit, supplied via Arduino 1.8.10 library manager
+ * u8g2 v2.26.14 - supplied with Arduino 1.8.10
  * 
  */
 
@@ -22,6 +23,8 @@ Sept 2015 - first version
 February 2017 - version 2.0 added Humidity Sensor
 February 2017 - version 2.1 improved humidity function and corrected some code
 23rd Jan 2020 - version 2.2 - updated code to rely on native libraries availabile through Arduino 1.8.10 library manager, updated to work with BMP280, added support for Heat Index display on temperature screen
+23rd Jan 2020 - version 2.2.1 - updated code to use u8g2 library - compiles but untested.
+23rd Jan 2020 - version 2.2.2 - audited global variables, removed redundant, moved moon phase graphics to PROGMEM
 
 Sketch updated February to include a Humidity Sensor DHT11 or DHT22
 A DS3231 RTC Chip should be used instead of the DS1307 to give better time stability
@@ -32,12 +35,14 @@ This sketch uses an Arduino Mega to provide more memory
 
 The program uses 73% of dynamic memory.
 
-OLED Analog Clock using U8GLIB Library
+OLED Analog Clock using U8G2 Library
 
-visit https://code.google.com/p/u8glib/ for full details of the U8GLIB library and
+visit https://github.com/olikraus/u8g2 for full details of the U8G2 library and
 full instructions for use.
 
 Using a IIC 128x64 OLED with SSD1306 chip and RTC DS1307 
+
+Font list for OLED display: https://github.com/olikraus/u8g2/wiki/fntlistall#30-pixel-height
 
 Connections: (All Pins are for the Arduino MEGA)
 
@@ -127,7 +132,8 @@ Small LED (green) to show backup data being saved to SD Card
   #include "RTClib.h"  // Real time clock
   #include <SD.h>  //SD Card
   #include <SPI.h> // used in SPI interface
-  #include "U8glib.h"  // graphics library
+//  #include "U8glib.h"  // graphics library
+  #include "U8g2lib.h"
   #include <Wire.h>  // used in SPI interface
   //
 /**********************************************************************/  
@@ -142,7 +148,15 @@ Small LED (green) to show backup data being saved to SD Card
 //
 /**********************************************************************/
 // setup u8g object
-  U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE);	// I2C 
+  //U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE);	// I2C 
+  /*
+   * The first argument to the display instantian on u8g2 is the display rotation
+   * See: https://github.com/olikraus/u8g2/wiki/u8g2reference#setdisplayrotation
+   * R0 is the original orientation of the v 2.1 code
+   * R2 is rotate 180 degrees - upside down
+   */
+  U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
+
 //
 // Hardware Error check
   boolean errorHardware1 = false; // RealTime Clock
@@ -173,7 +187,7 @@ Small LED (green) to show backup data being saved to SD Card
   String thisDay="";
   String thisMonth = "";
   String thisTime = ""; 
-  String thisWeekday ="";
+  //String thisWeekday =""; // Not used anywhere in the code - saves 6 bytes of global memory removing
 //
 // setup BMP280
   //BMP085 barometer;
@@ -226,11 +240,12 @@ Small LED (green) to show backup data being saved to SD Card
   int joyX = 0;
   boolean xValid = true;
   int joyY = 0;  
-  boolean yValid = false;
+  //boolean yValid = false; // Not used anywhere - but doesn't save and global var memory removing
 //
 // timer::
 //
-  long interval = 1000; 
+  //long interval = 1000;
+  const static long interval PROGMEM = 1000; // This is used once in the code and treated as a constant - it's wasting global variable space by being here
   const char* newTimeTimer = "00:00";
   unsigned long previousMillis = 0;
   String thisTimeTimer = "";
@@ -270,7 +285,7 @@ Small LED (green) to show backup data being saved to SD Card
   volatile boolean timeAlarmSet = false;
 //
 // random number
-  long randNumber;
+  //long randNumber; //redundant - not used in the code
 //
 // calendar::
 //
@@ -286,7 +301,9 @@ Small LED (green) to show backup data being saved to SD Card
   String week5 =""; 
 //
 // moon phase
-static unsigned char full_moon_bits[] = {
+//Defining these as globals variables in v2.2.1 code: 7268 bytes (88%)
+//Defining these as PROGMEM constants in v2.2.1 code: 6308 bytes (77%)
+const static unsigned char full_moon_bits[] PROGMEM = {
    0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x07, 0x00, 0x00, 0xff, 0x3f, 0x00,
    0x80, 0xff, 0x7f, 0x00, 0xe0, 0xff, 0xff, 0x01, 0xf0, 0xff, 0xff, 0x03,
    0xf0, 0xff, 0xff, 0x03, 0xf8, 0xff, 0xff, 0x07, 0xfc, 0xff, 0xff, 0x0f,
@@ -298,7 +315,7 @@ static unsigned char full_moon_bits[] = {
    0xf0, 0xff, 0xff, 0x03, 0xe0, 0xff, 0xff, 0x01, 0x80, 0xff, 0x7f, 0x00,
    0x00, 0xff, 0x3f, 0x00, 0x00, 0xf8, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
-static unsigned char waning_gibbous_bits[] = {
+const static unsigned char waning_gibbous_bits[] PROGMEM = {
    0x00, 0xf8, 0x0f, 0x00, 0x00, 0xff, 0x3f, 0x00, 0x80, 0xff, 0xff, 0x00,
    0xe0, 0xff, 0xff, 0x00, 0xf0, 0xff, 0x7f, 0x00, 0xf8, 0xff, 0x7f, 0x00,
    0xf8, 0xff, 0x3f, 0x00, 0xfc, 0xff, 0x1f, 0x00, 0xfe, 0xff, 0x1f, 0x00,
@@ -310,7 +327,7 @@ static unsigned char waning_gibbous_bits[] = {
    0xf8, 0xff, 0x3f, 0x00, 0xf0, 0xff, 0x3f, 0x00, 0xe0, 0xff, 0xff, 0x00,
    0x80, 0xff, 0xff, 0x00, 0x00, 0xff, 0x3f, 0x00, 0x00, 0xf8, 0x1f, 0x00 };
 
-static unsigned char last_quarter_bits[] = {
+const static unsigned char last_quarter_bits[] PROGMEM = {
    0x00, 0xf8, 0x0f, 0x00, 0x00, 0xff, 0x07, 0x00, 0x80, 0xff, 0x01, 0x00,
    0xe0, 0xff, 0x01, 0x00, 0xf0, 0xff, 0x00, 0x00, 0xf8, 0x7f, 0x00, 0x00,
    0xf8, 0x3f, 0x00, 0x00, 0xfc, 0x3f, 0x00, 0x00, 0xfe, 0x1f, 0x00, 0x00,
@@ -322,7 +339,7 @@ static unsigned char last_quarter_bits[] = {
    0xf8, 0x7f, 0x00, 0x00, 0xf0, 0xff, 0x00, 0x00, 0xe0, 0xff, 0x01, 0x00,
    0x80, 0xff, 0x01, 0x00, 0x00, 0xff, 0x07, 0x00, 0x00, 0xf8, 0x0f, 0x00 };
 
-static unsigned char crescent_old_bits[] = {
+const static unsigned char crescent_old_bits[] PROGMEM = {
    0x00, 0xf8, 0x07, 0x00, 0x00, 0xff, 0x00, 0x00, 0x80, 0x1f, 0x00, 0x00,
    0xe0, 0x0f, 0x00, 0x00, 0xf0, 0x03, 0x00, 0x00, 0xf8, 0x01, 0x00, 0x00,
    0xf8, 0x01, 0x00, 0x00, 0xfc, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x00, 0x00,
@@ -334,7 +351,7 @@ static unsigned char crescent_old_bits[] = {
    0xf8, 0x01, 0x00, 0x00, 0xf0, 0x03, 0x00, 0x00, 0xe0, 0x0f, 0x00, 0x00,
    0x80, 0x1f, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0xf8, 0x07, 0x00 };
 
-static unsigned char new_moon_bits[] = {
+const static unsigned char new_moon_bits[] PROGMEM = {
    0x00, 0xf8, 0x07, 0x00, 0x00, 0x07, 0x38, 0x00, 0x80, 0x00, 0x40, 0x00,
    0x60, 0x00, 0x80, 0x01, 0x10, 0x00, 0x00, 0x02, 0x08, 0x00, 0x00, 0x04,
    0x08, 0x00, 0x00, 0x04, 0x04, 0x00, 0x00, 0x08, 0x02, 0x00, 0x00, 0x10,
@@ -346,7 +363,7 @@ static unsigned char new_moon_bits[] = {
    0x08, 0x00, 0x00, 0x04, 0x10, 0x00, 0x00, 0x02, 0x60, 0x00, 0x80, 0x01,
    0x80, 0x00, 0x40, 0x00, 0x00, 0x07, 0x38, 0x00, 0x00, 0xf8, 0x07, 0x00 };
 
-static unsigned char crescent_new_bits[] = {
+const static unsigned char crescent_new_bits[] PROGMEM = {
    0x00, 0xf8, 0x07, 0x00, 0x00, 0xc0, 0x3f, 0x00, 0x00, 0x00, 0x7e, 0x00,
    0x00, 0x00, 0xfc, 0x01, 0x00, 0x00, 0xf0, 0x03, 0x00, 0x00, 0xe0, 0x07,
    0x00, 0x00, 0xe0, 0x07, 0x00, 0x00, 0xc0, 0x0f, 0x00, 0x00, 0x80, 0x1f,
@@ -358,7 +375,7 @@ static unsigned char crescent_new_bits[] = {
    0x00, 0x00, 0xe0, 0x07, 0x00, 0x00, 0xf0, 0x03, 0x00, 0x00, 0xfc, 0x01,
    0x00, 0x00, 0x7e, 0x00, 0x00, 0xc0, 0x3f, 0x00, 0x00, 0xf8, 0x07, 0x00 };
 
-static unsigned char first_quarter_bits[] = {
+const static unsigned char first_quarter_bits[] PROGMEM = {
    0x00, 0xfc, 0x07, 0x00, 0x00, 0xf8, 0x3f, 0x00, 0x00, 0xe0, 0x7f, 0x00,
    0x00, 0xe0, 0xff, 0x01, 0x00, 0xc0, 0xff, 0x03, 0x00, 0x80, 0xff, 0x07,
    0x00, 0x00, 0xff, 0x07, 0x00, 0x00, 0xff, 0x0f, 0x00, 0x00, 0xfe, 0x1f,
@@ -370,7 +387,7 @@ static unsigned char first_quarter_bits[] = {
    0x00, 0x80, 0xff, 0x07, 0x00, 0xc0, 0xff, 0x03, 0x00, 0xe0, 0xff, 0x01,
    0x00, 0xe0, 0x7f, 0x00, 0x00, 0xf8, 0x3f, 0x00, 0x00, 0xfc, 0x07, 0x00 };
 
-static unsigned char waxing_gibbous_bits[] = {
+const static unsigned char waxing_gibbous_bits[] PROGMEM = {
    0x00, 0xfc, 0x07, 0x00, 0x00, 0xff, 0x3f, 0x00, 0xc0, 0xff, 0x7f, 0x00,
    0xc0, 0xff, 0xff, 0x01, 0x80, 0xff, 0xff, 0x03, 0x80, 0xff, 0xff, 0x07,
    0x00, 0xff, 0xff, 0x07, 0x00, 0xfe, 0xff, 0x0f, 0x00, 0xfe, 0xff, 0x1f,
@@ -397,11 +414,11 @@ void setup(void) {
   //
   pinMode(buzzerPin, OUTPUT); // output
   //
-  u8g.firstPage(); 
-  u8g.setRot180();  // Fix if mounting the screen upside down - comment out or delete if not.
+  u8g2.firstPage(); 
+  //u8g.setRot180();  // Fix if mounting the screen upside down - comment out or delete if not.
   do {
       splash(); 
-    } while( u8g.nextPage() );
+    } while( u8g2.nextPage() );
   //  
   RTC.begin();
   // following line sets the RTC to the date & time this sketch was compiled  
@@ -563,107 +580,107 @@ void loop() {
   switch (displayScreen){
     case 0:
       // draw an analog screen
-      u8g.firstPage();
+      u8g2.firstPage();
       do {
         drawAnalog(); 
-      } while( u8g.nextPage() );
+      } while( u8g2.nextPage() );
       break;
     // 
     case 1:
       // digital display
-     u8g.firstPage();  
+     u8g2.firstPage();  
      do {
        drawDigital(); 
-     } while( u8g.nextPage() );
+     } while( u8g2.nextPage() );
      break;
     //
     case 2:
       // set Alarm display
-     u8g.firstPage();  
+     u8g2.firstPage();  
      do {
        drawSetAlarm(); 
-     } while( u8g.nextPage() );
+     } while( u8g2.nextPage() );
      break;     
     //   
     case 3:
       // timer display
-     u8g.firstPage();  
+     u8g2.firstPage();  
      do {   
        drawTimer(); 
-     } while( u8g.nextPage() );
+     } while( u8g2.nextPage() );
      break;     
     //
     case 4:
       // pressure display
-     u8g.firstPage();      
+     u8g2.firstPage();      
      do {
        drawPressure(); // draw pressure
-     } while( u8g.nextPage() ); 
+     } while( u8g2.nextPage() ); 
      break;
      //
      case 5:
       // plot pressure display
-     u8g.firstPage();     
+     u8g2.firstPage();     
      do {
        plotPressure(); // plot pressure
-     } while( u8g.nextPage() );  
+     } while( u8g2.nextPage() );  
      break;  
      //
      case 6:
       // weather forcast display
-     u8g.firstPage();      
+     u8g2.firstPage();      
      do {
        weatherForcast(); // weather forcast
-     } while( u8g.nextPage() ); 
+     } while( u8g2.nextPage() ); 
      break;  
      //   
      case 7:
       // temperature display
-     u8g.firstPage();      
+     u8g2.firstPage();      
      do {
        drawTemperature(); // draw temperature
-     } while( u8g.nextPage() ); 
+     } while( u8g2.nextPage() ); 
      break; 
      //
      case 8:
       // plot temperature display
-     u8g.firstPage();      
+     u8g2.firstPage();      
      do {
        plotTemperature(); // draw temperature
-     } while( u8g.nextPage() ); 
+     } while( u8g2.nextPage() ); 
      break;  
      //
      case 9:
       // phase of the moon
-     u8g.firstPage();      
+     u8g2.firstPage();      
      do {
        drawMoon(); // draw moon
-     } while( u8g.nextPage() ); 
+     } while( u8g2.nextPage() ); 
      break;      
      //
      case 10:
       // calendar display single day
-     u8g.firstPage();      
+     u8g2.firstPage();      
      do {
        drawCalendar2(); 
-     } while( u8g.nextPage() ); 
+     } while( u8g2.nextPage() ); 
      break;      
      //
      case 11:
       // calendar display
-     u8g.firstPage();      
+     u8g2.firstPage();      
      do {
        drawCalendar(); 
-     } while( u8g.nextPage() ); 
+     } while( u8g2.nextPage() ); 
      break; 
      //
      case 12:
       // humidity display
      greetingTemp = "Click for update";
-     u8g.firstPage();      
+     u8g2.firstPage();      
      do {
        drawHumidity(); 
-     } while( u8g.nextPage() ); 
+     } while( u8g2.nextPage() ); 
      break;             
   } // end of switch loop
  // 
@@ -673,53 +690,53 @@ void loop() {
     switch(displayScreen){
       case 13:
         // show data from 24 hours ago
-        u8g.firstPage();      
+        u8g2.firstPage();      
         do {
           plotPressure_24(); //  pressure data from 24 hours ago
-        } while( u8g.nextPage() ); 
+        } while( u8g2.nextPage() ); 
       break;
       case 14:
         // show data from 36 hours ago
-        u8g.firstPage();      
+        u8g2.firstPage();      
         do {
           plotPressure_48(); // pressure data from 48 hours ago
-        } while( u8g.nextPage() ); 
+        } while( u8g2.nextPage() ); 
       break; 
       // additional temperature screens
       case 15:
         // show data from 24 hours ago
-        u8g.firstPage();      
+        u8g2.firstPage();      
         do {
           plotTemperature_24(); //  temperature data from 24 hours ago
-        } while( u8g.nextPage() ); 
+        } while( u8g2.nextPage() ); 
       break;
       case 16:
         // show data from 36 hours ago
-        u8g.firstPage();      
+        u8g2.firstPage();      
         do {
           plotTemperature_48(); // temperature data from 48 hours ago
-        } while( u8g.nextPage() );   
+        } while( u8g2.nextPage() );   
       break;  
       case 17:
        // name the moon for each momth
-        u8g.firstPage();      
+        u8g2.firstPage();      
         do {
           nameMoon(); // names the full moon
-        } while( u8g.nextPage() );     
+        } while( u8g2.nextPage() );     
       break;
       case 18:
        // day rhyme
-        u8g.firstPage();      
+        u8g2.firstPage();      
         do {
           childDay(); // rhyme for the day
-        } while( u8g.nextPage() );     
+        } while( u8g2.nextPage() );     
       break;    
       case 19:
        // month rhyme
-        u8g.firstPage();      
+        u8g2.firstPage();      
         do {
           monthRhyme(); // rhyme for the month
-        } while( u8g.nextPage() );     
+        } while( u8g2.nextPage() );     
       break;        
     
     } // end of switch loop for additional screens
@@ -905,8 +922,8 @@ void drawAnalog(void) {  // draws an analog clock face
   DateTime now = RTC.now();
   //
   // Now draw the clock face
-  u8g.drawCircle(64, 32, 20); // main outer circle
-  u8g.drawCircle(64, 32, 2);  // small inner circle
+  u8g2.drawCircle(64, 32, 20); // main outer circle
+  u8g2.drawCircle(64, 32, 2);  // small inner circle
   //
   //hour ticks
   for( int z=0; z < 360;z= z + 30 ){
@@ -917,28 +934,28 @@ void drawAnalog(void) {  // draws an analog clock face
     int y2=(32-(cos(angle)*20));
     int x3=(64+(sin(angle)*(20-5)));
     int y3=(32-(cos(angle)*(20-5)));
-    u8g.drawLine(x2,y2,x3,y3);
+    u8g2.drawLine(x2,y2,x3,y3);
   }
   // display second hand
   float angle = now.second()*6 ;
   angle=(angle/57.29577951) ; //Convert degrees to radians  
   int x3=(64+(sin(angle)*(20)));
   int y3=(32-(cos(angle)*(20)));
-  u8g.drawLine(64,32,x3,y3);
+  u8g2.drawLine(64,32,x3,y3);
   //
   // display minute hand
   angle = now.minute() * 6 ;
   angle=(angle/57.29577951) ; //Convert degrees to radians  
   x3=(64+(sin(angle)*(20-3)));
   y3=(32-(cos(angle)*(20-3)));
-  u8g.drawLine(64,32,x3,y3);
+  u8g2.drawLine(64,32,x3,y3);
   //
   // display hour hand
   angle = now.hour() * 30 + int((now.minute() / 12) * 6 )   ;
   angle=(angle/57.29577951) ; //Convert degrees to radians  
   x3=(64+(sin(angle)*(20-11)));
   y3=(32-(cos(angle)*(20-11)));
-  u8g.drawLine(64,32,x3,y3);
+  u8g2.drawLine(64,32,x3,y3);
   //
   // display greeting
   if (now.month() == birthMonth && now.day() == birthDay){
@@ -950,14 +967,14 @@ void drawAnalog(void) {  // draws an analog clock face
     if (now.hour() >= 17 && now.hour() <= 23){greetingTime = " Good Evening";}
     if (now.hour() >= 0 && now.hour() <= 5){greetingTime = "  Sleep well";}
   }
-  u8g.setFont(u8g_font_profont15);
-  u8g.drawStr(20,10, greetingTime);
+  u8g2.setFont(u8g_font_profont15);
+  u8g2.drawStr(20,10, greetingTime);
   // show alarm state
   if (timeAlarmSet == true){
-    u8g.drawStr(25,62, "Alarm is SET");    
+    u8g2.drawStr(25,62, "Alarm is SET");    
   }
   else{
-    u8g.drawStr(12,62, "Alarm is not set");
+    u8g2.drawStr(12,62, "Alarm is not set");
   }
 }
 
@@ -965,7 +982,7 @@ void drawAnalog(void) {  // draws an analog clock face
 //
 void drawDigital(){
   // shows time in Digital Format  
-  u8g.setFont(u8g_font_profont12);
+  u8g2.setFont(u8g_font_profont12);
   String alarmSetTime = "Alarm set for ";
   if(alarmHour <10){
     alarmSetTime = alarmSetTime + "0" + String(alarmHour);
@@ -980,8 +997,8 @@ void drawDigital(){
     alarmSetTime = alarmSetTime +  ":" + String(alarmMinute);    
   }
   const char* newalarmSetTime = (const char*) alarmSetTime.c_str();  
-  if(timeAlarmSet){u8g.drawStr(8,10, newalarmSetTime);} // show alarm is set   
-    u8g.setFont(u8g_font_profont29); 
+  if(timeAlarmSet){u8g2.drawStr(8,10, newalarmSetTime);} // show alarm is set   
+    u8g2.setFont(u8g_font_profont29); 
     DateTime now = RTC.now();   
     // display time in digital format
     thisTime="";
@@ -997,15 +1014,15 @@ void drawDigital(){
     thisTime=thisTime + String(now.minute());
     if (now.hour() < 10){thisTime = "0" + thisTime;} // add leading zero if required 
     const char* newTime = (const char*) thisTime.c_str();
-    u8g.drawStr(25,40, newTime);   
+    u8g2.drawStr(25,40, newTime);   
     // display date at bottom of screen
-    u8g.setFont(u8g_font_profont15);
+    u8g2.setFont(u8g_font_profont15);
     thisDay = String(now.day(), DEC) + "/"; 
     thisMonth=monthString[now.month()-1]; 
     thisDay=thisDay + thisMonth + "/"; 
     thisDay=thisDay + String(now.year() , DEC);
     const char* newDay = (const char*) thisDay.c_str(); 
-    u8g.drawStr(25,60, newDay);    
+    u8g2.drawStr(25,60, newDay);    
 }
 
 /*Screen 3 - Set Alarm Time*************************************/
@@ -1013,27 +1030,27 @@ void drawDigital(){
 
  void drawSetAlarm(){
    // set the Alarm time 
-   u8g.setFont(u8g_font_profont15);
-   u8g.drawStr(15,10, "Set Alarm time:"); 
+   u8g2.setFont(u8g_font_profont15);
+   u8g2.drawStr(15,10, "Set Alarm time:"); 
    if (alarmSetMinutes == true){
-     u8g.drawStr(1,60, "CLICK to Set Hours");
+     u8g2.drawStr(1,60, "CLICK to Set Hours");
    }
    else{
-     u8g.drawStr(5,60, "CLICK to Set Mins");
+     u8g2.drawStr(5,60, "CLICK to Set Mins");
    }     
-   u8g.setFont(u8g_font_profont29); 
+   u8g2.setFont(u8g_font_profont29); 
    alarmThisTime = String(alarmMinute);
    //
    if (alarmMinute < 10){alarmThisTime = "0" + alarmThisTime;} // add leading zero if required 
    alarmThisTime = String(alarmHour) + ":" + alarmThisTime;
    if (alarmHour < 10){alarmThisTime = "0" + alarmThisTime;} // add leading zero if required 
    const char* newTime = (const char*) alarmThisTime.c_str();
-   u8g.drawStr(25,40, newTime); // show time
+   u8g2.drawStr(25,40, newTime); // show time
    if (alarmSetMinutes == true){   
-     u8g.drawStr(72,41, "__"); // show setting minutes 
+     u8g2.drawStr(72,41, "__"); // show setting minutes 
    }
    else{
-     u8g.drawStr(24,41, "__"); // show setting hours  
+     u8g2.drawStr(24,41, "__"); // show setting hours  
    }    
    // read Y joystick moving up and down
    // read joystick moving down
@@ -1084,20 +1101,20 @@ void drawDigital(){
 //
 void drawTimer(){
   // count up timer, max 99 minutes  
-  u8g.setFont(u8g_font_profont15);
-  u8g.drawStr(45,10, "Timer:");  
+  u8g2.setFont(u8g_font_profont15);
+  u8g2.drawStr(45,10, "Timer:");  
  // 
   if (buttonFlag == false){  
     digitalWrite(buzzerPin, HIGH); // turn buzzer off
     digitalWrite(8, LOW); // led off   
-    u8g.drawStr(20,60, "CLICK to Start");   
-    u8g.setFont(u8g_font_profont29);
-    u8g.drawStr(25,40, newTimeTimer);
+    u8g2.drawStr(20,60, "CLICK to Start");   
+    u8g2.setFont(u8g_font_profont29);
+    u8g2.drawStr(25,40, newTimeTimer);
     timerSecs = -1;
     timerMins = 0;    
   }
   else{
-    u8g.drawStr(20,60, "CLICK to Stop");
+    u8g2.drawStr(20,60, "CLICK to Stop");
     unsigned long currentMillis = millis();     
     if(currentMillis - previousMillis >= interval) {
       previousMillis = currentMillis;        
@@ -1143,8 +1160,8 @@ void drawTimer(){
     thisTimeTimer = String(timerMins) + ":" + thisTimeTimer;
     if (timerMins < 10){ thisTimeTimer= "0" + thisTimeTimer;} // add leading zero if required           
     newTimeTimer = (const char*) thisTimeTimer.c_str();
-    u8g.setFont(u8g_font_profont29);   
-    u8g.drawStr(25,40, newTimeTimer); 
+    u8g2.setFont(u8g_font_profont29);   
+    u8g2.drawStr(25,40, newTimeTimer); 
   }
 }
 
@@ -1153,40 +1170,41 @@ void drawTimer(){
 void drawPressure(){
   // displays current pressure in mb
   float tempReading = 0;
-  u8g.setFont(u8g_font_profont15);
-  u8g.drawStr(35,10, "Pressure:");
+  u8g2.setFont(u8g_font_profont15);
+  u8g2.drawStr(35,10, "Pressure:");
   //
   // check value against last reading
-  u8g.setFont(u8g_font_profont15); 
+  u8g2.setFont(u8g_font_profont15); 
   if(recordDataPressure[0][recordPointer] > 0.00){
     tempReading = recordDataPressure[0][recordPointer];
     if((localPressure/100) > tempReading){ 
-      u8g.drawStr(30,60, "**Rising**"); 
+      u8g2.drawStr(30,60, "**Rising**"); 
     }
     if((localPressure/100) < tempReading){ 
-      u8g.drawStr(30,60, "**Falling**"); 
+      u8g2.drawStr(30,60, "**Falling**"); 
     }       
     if((localPressure/100) == tempReading){ 
-      u8g.drawStr(25,60, "**Constant**"); 
+      u8g2.drawStr(25,60, "**Constant**"); 
     }  
     if((localPressure/100) < 900){ 
-      u8g.drawStr(30,60, " **STORM**"); 
+      u8g2.drawStr(30,60, " **STORM**"); 
     } 
   }
   else{
-    u8g.drawStr(22,60, " **Waiting**");      
+    u8g2.drawStr(22,60, " **Waiting**");      
   }
   if(pascal == false){  
     thisPressure = String(int(localPressure/100)) + "mb"; 
     const char* newPressure = (const char*) thisPressure.c_str();
-    u8g.setFont(u8g_font_profont29);  
-    u8g.drawStr(20,40, newPressure); 
+    u8g2.setFont(u8g_font_profont29);  
+    u8g2.drawStr(20,40, newPressure); 
   }
   else{   
     thisPressure = String(round(localPressure)) + "pa";  
     const char* newPressure = (const char*) thisPressure.c_str();
-    u8g.setFont(u8g_font_fub17);  
-    u8g.drawStr(15,40, newPressure); 
+    //u8g.setFont(u8g_font_fub17);  
+    u8g2.setFont(u8g2_font_fub17_tr);  
+    u8g2.drawStr(15,40, newPressure); 
   }
 }
 
@@ -1197,11 +1215,11 @@ void plotPressure(){
  //  
    double tempYvalueP;    
    double tempYvalue;   
-   u8g.setFont(u8g_font_5x7); 
-   u8g.drawStr(30,10, "Pressure Today");
+   u8g2.setFont(u8g_font_5x7); 
+   u8g2.drawStr(30,10, "Pressure Today");
    drawPressureGraph(); // outline graph
    if(recordNumber == 0.00){
-     u8g.drawStr(19,35, "Data not available");
+     u8g2.drawStr(19,35, "Data not available");
    }    
    // now plot graph
    // x starts at 4 pixels and each hour is 5 pixels
@@ -1216,7 +1234,7 @@ void plotPressure(){
      if(tempYvalueP > 1020){
        tempYvalueP = 1020; // dont allow values over 1020mb
      }     
-     u8g.drawCircle((5*f)+4,64 -(2.1*(tempYvalueP-990)),1);
+     u8g2.drawCircle((5*f)+4,64 -(2.1*(tempYvalueP-990)),1);
    }
 }
 /*Screen 14 = Plot Pressure - 24 hours*************************************************************/
@@ -1225,11 +1243,11 @@ void plotPressure_24(){
  // 
    double tempYvalueP;    
    double tempYvalue;   
-   u8g.setFont(u8g_font_5x7); 
-   u8g.drawStr(19,10, "Pressure Yesterday");
+   u8g2.setFont(u8g_font_5x7); 
+   u8g2.drawStr(19,10, "Pressure Yesterday");
    drawPressureGraph(); // outline graph
    if(recordDataPressure[1][24] == 0.00){
-     u8g.drawStr(19,35, "Data not available");
+     u8g2.drawStr(19,35, "Data not available");
    }
      for(int f = 0; f < recordDataPressure[1][24]+1;f++){  
      // limit range to 990 - 1020mb
@@ -1240,7 +1258,7 @@ void plotPressure_24(){
        if(tempYvalueP > 1020){
          tempYvalueP = 1020; // dont allow values over 1020mb
        }     
-       u8g.drawCircle((5*f)+4,64 -(2.1*(tempYvalueP-990)),1);
+       u8g2.drawCircle((5*f)+4,64 -(2.1*(tempYvalueP-990)),1);
      }
 }
 /*Screen 15 = Plot Pressure = 48 hours*************************************************************/
@@ -1249,11 +1267,11 @@ void plotPressure_48(){
   //  
   double tempYvalueP;    
   double tempYvalue;    
-  u8g.setFont(u8g_font_5x7); 
-  u8g.drawStr(16,10, "Pressure 48 hrs ago");   
+  u8g2.setFont(u8g_font_5x7); 
+  u8g2.drawStr(16,10, "Pressure 48 hrs ago");   
   drawPressureGraph(); // outline graph
   if(recordDataPressure[2][24] == 0.00){
-    u8g.drawStr(19,35, "Data not available");
+    u8g2.drawStr(19,35, "Data not available");
   }
     for(int f = 0; f < recordDataPressure[2][24]+1;f++){  
     // limit range to 990 - 1020mb
@@ -1264,7 +1282,7 @@ void plotPressure_48(){
       if(tempYvalueP > 1020){
         tempYvalueP = 1020; // dont allow values over 1020mb
       }     
-      u8g.drawCircle((5*f)+4,64 -(2.1*(tempYvalueP-990)),1);
+      u8g2.drawCircle((5*f)+4,64 -(2.1*(tempYvalueP-990)),1);
     }
 }
 /*Screen 7 - Weather Forecast**********************************/
@@ -1282,27 +1300,27 @@ void weatherForcast(){
   */
   // uses pressure to forcast weather
    getForecast(); // get new forecast 
-   u8g.drawLine(0,50,128,50);    
-   u8g.setFont(u8g_font_profont12); 
-   u8g.drawStr(18,10, "Weather Forecast"); 
-   u8g.drawLine(0,15,128,15); // draw horizontal line
+   u8g2.drawLine(0,50,128,50);    
+   u8g2.setFont(u8g_font_profont12); 
+   u8g2.drawStr(18,10, "Weather Forecast"); 
+   u8g2.drawLine(0,15,128,15); // draw horizontal line
    if(thisForecast == "  Waiting for Data" && longForecast == "  Waiting for Data"){    
-     u8g.drawStr(3,35, "  Waiting for Data");
+     u8g2.drawStr(3,35, "  Waiting for Data");
    }
    else{   
      if(switchForecast == false){
      // now print current forecast
        const char*newthisForecast = (const char*) thisForecast.c_str();     
-       u8g.drawStr(3,35, newthisForecast);
-       u8g.setFont(u8g_font_5x7);    
-       u8g.drawStr(5,60, "Click for long forecast");       
+       u8g2.drawStr(3,35, newthisForecast);
+       u8g2.setFont(u8g_font_5x7);    
+       u8g2.drawStr(5,60, "Click for long forecast");       
      }
      else{
      // now print forecast based on last 2 hours  
        const char*newthisForecast = (const char*) thisForecast.c_str();    
-       u8g.drawStr(3,35, newthisForecast);      
-       u8g.setFont(u8g_font_5x7); 
-       u8g.drawStr(5,60, "Click for short forecast");       
+       u8g2.drawStr(3,35, newthisForecast);      
+       u8g2.setFont(u8g_font_5x7); 
+       u8g2.drawStr(5,60, "Click for short forecast");       
      } 
      // show direction and ammount
      String ra = "";
@@ -1314,8 +1332,8 @@ void weatherForcast(){
        ra =  rise + String(riseAmmount) + "pa";
      }
      const char*newDirection = (const char*)ra.c_str();
-     u8g.setFont(u8g_font_profont12);   
-     u8g.drawStr(14,47, newDirection); 
+     u8g2.setFont(u8g_font_profont12);   
+     u8g2.drawStr(14,47, newDirection); 
      //
    }
 }
@@ -1403,29 +1421,29 @@ void drawTemperature(){
   // displays local temperature
   //
   if(showC == 1){
-    u8g.setFont(u8g_font_profont15);
-    u8g.drawStr(25,10, "Temperature:");
+    u8g2.setFont(u8g_font_profont15);
+    u8g2.drawStr(25,10, "Temperature:");
     localTempF = localTemp * 1.8 + 32.0; 
     thisTemperature = String(int(localTempF)) + "\260F";  // displays degree symbol 
   } else if (showC == 0) {
-    u8g.setFont(u8g_font_profont15);
-    u8g.drawStr(25,10, "Temperature:");
+    u8g2.setFont(u8g_font_profont15);
+    u8g2.drawStr(25,10, "Temperature:");
     thisTemperature = String(int(localTemp)) + "\260C"; // displays degree symbol
   } else if (showC == 2) {
-    u8g.setFont(u8g_font_profont15);
-    u8g.drawStr(25,10, "Heat Index:");
+    u8g2.setFont(u8g_font_profont15);
+    u8g2.drawStr(25,10, "Heat Index:");
     thisTemperature = String(int(heatIndexValue)) + "\260C";
   }
   const char* newTemperature = (const char*) thisTemperature.c_str();
-  u8g.setFont(u8g_font_profont29);    
-  u8g.drawStr(35,40, newTemperature); 
+  u8g2.setFont(u8g_font_profont29);    
+  u8g2.drawStr(35,40, newTemperature); 
   // add a greeting 
   if(localTemp < 4){greetingTemp = "   Ice Warning!";}
   if(localTemp >= 4 && localTemp <18){greetingTemp = "It's a bit chilly";}
   if(localTemp >=18 && localTemp <25){greetingTemp = "   Just right!";}
   if(localTemp >24){greetingTemp = "Getting too warm!";}
-  u8g.setFont(u8g_font_profont15);
-  u8g.drawStr(10,60, greetingTemp);  
+  u8g2.setFont(u8g_font_profont15);
+  u8g2.drawStr(10,60, greetingTemp);  
 }
 
 /*Screen 9 - Plot temperature over 24 hours********************/
@@ -1434,15 +1452,15 @@ void plotTemperature(){
   // displays a plot of the temperature over the last 24 hours
   double tempYvalueP;    
   double tempYvalue;    
-  u8g.setFont(u8g_font_5x7); 
-  u8g.drawStr(20,10, "Temperature Today");   
+  u8g2.setFont(u8g_font_5x7); 
+  u8g2.drawStr(20,10, "Temperature Today");   
   drawTemperatureGraph();
   // now plot graph
   // x starts at 4 pixels and each hour is 5 pixels
   // y is 1.6 pixels per degree centigrade 
   // as 0,0 pixel is top left, value for y should be subtracted from 64
   if(recordNumber == 0.00){
-    u8g.drawStr(19,28, "Data not available");
+    u8g2.drawStr(19,28, "Data not available");
   } 
   else{
     for(int f = 0; f < recordPointer+1;f++){  
@@ -1454,7 +1472,7 @@ void plotTemperature(){
       if(tempYvalue > 40){
         tempYvalue = 40; // dont allow values over 40 centigrade
       }     
-      u8g.drawCircle((5*f)+4,64 -(1.6*tempYvalue),1);
+      u8g2.drawCircle((5*f)+4,64 -(1.6*tempYvalue),1);
       }
    }
 }
@@ -1464,11 +1482,11 @@ void plotTemperature_24(){
   // displays a plot of the temperature over the last 24 hours
   double tempYvalueP;    
   double tempYvalue;    
-  u8g.setFont(u8g_font_5x7); 
-  u8g.drawStr(25,10, "Temp. Yesterday");   
+  u8g2.setFont(u8g_font_5x7); 
+  u8g2.drawStr(25,10, "Temp. Yesterday");   
   drawTemperatureGraph();
   if(recordDataTemp[1][24] == 0.00){
-    u8g.drawStr(19,28, "Data not available");
+    u8g2.drawStr(19,28, "Data not available");
   } 
   else{
     for(int f = 0; f <recordDataTemp[1][24]+1;f++){  
@@ -1480,7 +1498,7 @@ void plotTemperature_24(){
     if(tempYvalue > 40){
       tempYvalue = 40; // dont allow values over 40 centigrade
     }     
-    u8g.drawCircle((5*f)+4,64 -(1.6*tempYvalue),1);
+    u8g2.drawCircle((5*f)+4,64 -(1.6*tempYvalue),1);
     }
   }
 }
@@ -1489,11 +1507,11 @@ void plotTemperature_48(){
   // displays a plot of the temperature over the last 24 hours
   double tempYvalueP;    
   double tempYvalue;    
-  u8g.setFont(u8g_font_5x7); 
-  u8g.drawStr(23,10, "Temp. 48 hrs ago");   
+  u8g2.setFont(u8g_font_5x7); 
+  u8g2.drawStr(23,10, "Temp. 48 hrs ago");   
   drawTemperatureGraph();
   if(recordDataTemp[2][24] == 0.00){
-    u8g.drawStr(19,28, "Data not available");
+    u8g2.drawStr(19,28, "Data not available");
   } 
   else{
     for(int f = 0; f < recordDataTemp[2][24]+1;f++){  
@@ -1505,7 +1523,7 @@ void plotTemperature_48(){
       if(tempYvalue > 40){
         tempYvalue = 40; // dont allow values over 40 centigrade
       }     
-      u8g.drawCircle((5*f)+4,64 -(1.6*tempYvalue),1);
+      u8g2.drawCircle((5*f)+4,64 -(1.6*tempYvalue),1);
       }
    }
 }
@@ -1514,47 +1532,47 @@ void plotTemperature_48(){
 //
 void drawMoon(void){
   DateTime now = RTC.now();    
-  u8g.setFont(u8g_font_5x7); 
-  u8g.drawStr(15,10, "Moon Phase Calculator"); 
-  u8g.drawLine(0,13,128,13); 
+  u8g2.setFont(u8g_font_5x7); 
+  u8g2.drawStr(15,10, "Moon Phase Calculator"); 
+  u8g2.drawLine(0,13,128,13); 
   int mp = moon_phase();
-  u8g.setFont(u8g_font_profont15);   
+  u8g2.setFont(u8g_font_profont15);   
   switch (mp){
     case 0:
-      u8g.drawStr(15,61, "  Full Moon  ");
-      u8g.drawXBM(45,18,30,30,full_moon_bits);      
+      u8g2.drawStr(15,61, "  Full Moon  ");
+      u8g2.drawXBM(45,18,30,30,full_moon_bits);      
     break;
     case 1:
-      u8g.drawStr(15,61, "Waning Gibbous");
-      u8g.drawXBM(45,18,30,30,waning_gibbous_bits);
+      u8g2.drawStr(15,61, "Waning Gibbous");
+      u8g2.drawXBM(45,18,30,30,waning_gibbous_bits);
     break;
     case 2:
-      u8g.drawStr(15,61, " Last Quarter ");
-      u8g.drawXBM(45,18,30,30,last_quarter_bits);      
+      u8g2.drawStr(15,61, " Last Quarter ");
+      u8g2.drawXBM(45,18,30,30,last_quarter_bits);      
     break;
     case 3:
-      u8g.drawStr(15,61, " Old Crescent ");
-      u8g.drawXBM(45,18,30,30,crescent_old_bits);      
+      u8g2.drawStr(15,61, " Old Crescent ");
+      u8g2.drawXBM(45,18,30,30,crescent_old_bits);      
     break;     
     case 4:
-      u8g.drawStr(15,61, "   New Moon   ");
-      u8g.drawXBM(45,18,30,30,new_moon_bits);      
+      u8g2.drawStr(15,61, "   New Moon   ");
+      u8g2.drawXBM(45,18,30,30,new_moon_bits);      
     break;  
     case 5:
-      u8g.drawStr(15,61, " New Crescent ");
-      u8g.drawXBM(45,18,30,30,crescent_new_bits);      
+      u8g2.drawStr(15,61, " New Crescent ");
+      u8g2.drawXBM(45,18,30,30,crescent_new_bits);      
     break; 
     case 6:
-      u8g.drawStr(15,61, " First Quarter");
-      u8g.drawXBM(45,18,30,30,first_quarter_bits);      
+      u8g2.drawStr(15,61, " First Quarter");
+      u8g2.drawXBM(45,18,30,30,first_quarter_bits);      
     break;
     case 7:
-      u8g.drawStr(15,61, "Waxing Gibbous");
-      u8g.drawXBM(45,18,30,30,waxing_gibbous_bits);      
+      u8g2.drawStr(15,61, "Waxing Gibbous");
+      u8g2.drawXBM(45,18,30,30,waxing_gibbous_bits);      
     break;   
   }
  const char* newNfm = (const char*) nfm.c_str();  
- u8g.drawStr(110,30, newNfm); 
+ u8g2.drawStr(110,30, newNfm); 
 }
 
 int moon_phase(){
@@ -1725,14 +1743,14 @@ void nameMoon(){
     }   
   */
  
-  u8g.setFont(u8g_font_5x7);  
-  u8g.drawStr(10,10, "The full moon is called"); 
-  u8g.drawStr(15,55, "from Medieval Britian");
-  //u8g.drawStr(15,55, "North American Indian");
-  //u8g.drawStr(15,55, " from Chinese Verse");  
+  u8g2.setFont(u8g_font_5x7);  
+  u8g2.drawStr(10,10, "The full moon is called"); 
+  u8g2.drawStr(15,55, "from Medieval Britian");
+  //u8g2.drawStr(15,55, "North American Indian");
+  //u8g2.drawStr(15,55, " from Chinese Verse");  
   const char*newMoonName = (const char*) nameOfMoon.c_str();
-  u8g.setFont(u8g_font_profont15);   
-  u8g.drawStr(5,33, newMoonName); 
+  u8g2.setFont(u8g_font_profont15);   
+  u8g2.drawStr(5,33, newMoonName); 
 }
 
 /*Screen 11 - Show Date****************************************/
@@ -1741,22 +1759,23 @@ void nameMoon(){
   // show todays date  
   DateTime now = RTC.now(); // get date
   //monthName = monthString[now.month()-1];      
-  u8g.setFont(u8g_font_profont22); 
+  u8g2.setFont(u8g_font_profont22); 
   const char* newMonthName = (const char*) monthString[now.month()-1].c_str();  
-  u8g.drawStr(47,22, newMonthName);  
+  u8g2.drawStr(47,22, newMonthName);  
   String dayNow = String(now.day());
   if (now.day() < 10){
     dayNow = "0" + dayNow;
   }
   const char* newCal2 = (const char*) dayNow.c_str();
-  u8g.setFont(u8g_font_fub30);  
-  u8g.drawStr(41,60, newCal2); 
+  //u8g.setFont(u8g_font_fub30);  
+  u8g2.setFont(u8g2_font_fub30_tr);
+  u8g2.drawStr(41,60, newCal2); 
   // draw boxes
-  u8g.drawFrame(30,0,65,64);
-  u8g.drawFrame(30,0,65,27);
+  u8g2.drawFrame(30,0,65,64);
+  u8g2.drawFrame(30,0,65,27);
 // draw circles
-  u8g.drawCircle(37,10,3);
-  u8g.drawCircle(87,10,3);  
+  u8g2.drawCircle(37,10,3);
+  u8g2.drawCircle(87,10,3);  
  }
 /*Screen 19 - Show day with childs attitude*****************************/  
 void childDay(){
@@ -1796,20 +1815,20 @@ void childDay(){
       rhymePart2 = " loving and giving";
     break;  
   }
-  u8g.setFont(u8g_font_5x7); 
+  u8g2.setFont(u8g_font_5x7); 
   const char*newRhyme1 = (const char*) rhymePart1.c_str();
   const char*newRhyme2 = (const char*) rhymePart2.c_str();
   const char*newRhyme3 = (const char*) rhymePart3.c_str();   
-  u8g.drawStr(19,60, "English Rhyme 1838"); 
-  u8g.setFont(u8g_font_profont12); 
+  u8g2.drawStr(19,60, "English Rhyme 1838"); 
+  u8g2.setFont(u8g_font_profont12); 
   if(now.dayOfTheWeek() == 0){ 
-    u8g.drawStr(1,15, newRhyme1);
-    u8g.drawStr(1,30, newRhyme2); 
-    u8g.drawStr(1,45, newRhyme3); 
+    u8g2.drawStr(1,15, newRhyme1);
+    u8g2.drawStr(1,30, newRhyme2); 
+    u8g2.drawStr(1,45, newRhyme3); 
   }
   else{
-    u8g.drawStr(8,20, newRhyme1);
-    u8g.drawStr(8,35, newRhyme2); 
+    u8g2.drawStr(8,20, newRhyme1);
+    u8g2.drawStr(8,35, newRhyme2); 
   }
 } 
 
@@ -1818,8 +1837,8 @@ void childDay(){
  void drawCalendar(){
   // display a full month on a calendar 
   int f = 0;
-  u8g.setFont(u8g_font_profont12);
-  u8g.drawStr(2,9, "Su Mo Tu We Th Fr Sa"); 
+  u8g2.setFont(u8g_font_profont12);
+  u8g2.drawStr(2,9, "Su Mo Tu We Th Fr Sa"); 
   // display this month
   DateTime now = RTC.now();
   //
@@ -1867,7 +1886,7 @@ void childDay(){
   } // end first week
   newWeekStart = (7-startDay)+1;
   const char* newWeek1 = (const char*) week1.c_str();  
-  u8g.drawStr(2,19,newWeek1); 
+  u8g2.drawStr(2,19,newWeek1); 
   // display week 2
   week2 ="";
   for (f = newWeekStart; f < newWeekStart + 7; f++){
@@ -1877,7 +1896,7 @@ void childDay(){
     else{week2 = week2 + String(f) + " ";}    
   }
   const char* newWeek2 = (const char*) week2.c_str();  
-  u8g.drawStr(2,29,newWeek2); 
+  u8g2.drawStr(2,29,newWeek2); 
   // display week 3
   newWeekStart = (14-startDay)+1; 
   week3 ="";
@@ -1888,7 +1907,7 @@ void childDay(){
     else{week3 = week3 + String(f) + " ";}    
   }
   const char* newWeek3 = (const char*) week3.c_str();  
-  u8g.drawStr(2,39,newWeek3);     
+  u8g2.drawStr(2,39,newWeek3);     
   // display week 4
   newWeekStart = (21-startDay)+1; 
   week4 ="";
@@ -1899,7 +1918,7 @@ void childDay(){
     else{week4 = week4 + String(f) + " ";}    
     }
    const char* newWeek4 = (const char*) week4.c_str();  
-   u8g.drawStr(2,49,newWeek4); 
+   u8g2.drawStr(2,49,newWeek4); 
    // do we need a fifth week
    week5="";
    newWeekStart = (28-startDay)+1;   
@@ -1931,7 +1950,7 @@ void childDay(){
      } 
    }
    const char* newWeek5 = (const char*) week5.c_str();  
-   u8g.drawStr(2,59,newWeek5);
+   u8g2.drawStr(2,59,newWeek5);
  } 
 /*Screen 20 - Month Rhyme*************************************************************/
 void monthRhyme(){
@@ -2003,15 +2022,15 @@ void monthRhyme(){
     break;      
     
   }
-  u8g.setFont(u8g_font_5x7); 
+  u8g2.setFont(u8g_font_5x7); 
   const char*newRhyme1 = (const char*) rhymePart1.c_str();
   const char*newRhyme2 = (const char*) rhymePart2.c_str();
   const char*newRhyme3 = (const char*) rhymePart3.c_str();   
-  u8g.drawStr(19,60, " by Sara Coleridge"); 
-  u8g.setFont(u8g_font_profont12); 
-  u8g.drawStr(1,15, newRhyme1);
-  u8g.drawStr(1,30, newRhyme2); 
-  u8g.drawStr(1,45, newRhyme3); 
+  u8g2.drawStr(19,60, " by Sara Coleridge"); 
+  u8g2.setFont(u8g_font_profont12); 
+  u8g2.drawStr(1,15, newRhyme1);
+  u8g2.drawStr(1,30, newRhyme2); 
+  u8g2.drawStr(1,45, newRhyme3); 
 } 
 
 /*Screen 13 - Humidity*******************************************************/
@@ -2022,24 +2041,24 @@ void drawHumidity(){
     getHumidity(); // update if the joystick was pressed
     humidityUpdate = false;
   }
-  u8g.setFont(u8g_font_profont15);
-  u8g.drawStr(25,10, " Humidity:");
+  u8g2.setFont(u8g_font_profont15);
+  u8g2.drawStr(25,10, " Humidity:");
   //
   if(errorHardware3 == false){
     thisHumidity = String(int(humidityValue)) + "%"; // displays percentage symbol
     const char* newHumidity = (const char*) thisHumidity.c_str();
-    u8g.setFont(u8g_font_profont29);    
-    u8g.drawStr(35,40, newHumidity);  
+    u8g2.setFont(u8g_font_profont29);    
+    u8g2.drawStr(35,40, newHumidity);  
     //
-    u8g.setFont(u8g_font_profont15);
-    u8g.drawStr(10,60, greetingHumidity);
+    u8g2.setFont(u8g_font_profont15);
+    u8g2.drawStr(10,60, greetingHumidity);
     // now add dewpoint
-    u8g.setFont(u8g_font_profont12);
-    u8g.drawStr(100,20, "Dew");
-    u8g.drawStr(95,30, "Point");
+    u8g2.setFont(u8g_font_profont12);
+    u8g2.drawStr(100,20, "Dew");
+    u8g2.drawStr(95,30, "Point");
     thisDewPoint = String(dewPointValue) +  "\260C";
     const char* newDewPoint = (const char*) thisDewPoint.c_str();
-    u8g.drawStr(100,43,  newDewPoint);
+    u8g2.drawStr(100,43,  newDewPoint);
     //
     // show age of reading
     if((readingAge - lastReading) == 0){
@@ -2050,13 +2069,13 @@ void drawHumidity(){
     } 
     String ageValue = String(readingAge - lastReading);
     const char* newAge = (const char*) ageValue.c_str();
-    u8g.drawStr(13,35, newAge);
-    u8g.drawStr(10,22, "Age");
-    u8g.drawStr(10,45, "min");
+    u8g2.drawStr(13,35, newAge);
+    u8g2.drawStr(10,22, "Age");
+    u8g2.drawStr(10,45, "min");
   }
   else{
-    u8g.drawStr(10,30, " Humidity Sensor");
-    u8g.drawStr(10,45, "     Missing");
+    u8g2.drawStr(10,30, " Humidity Sensor");
+    u8g2.drawStr(10,45, "     Missing");
   }
 }
 /*************************************************************/
@@ -2300,11 +2319,11 @@ int startDayOfWeek(int y, int m, int d){
 
 /********************************************************/ 
 void splash(){
-  u8g.setFont(u8g_font_profont12); 
-  u8g.drawStr(7,10, "Joystick Controlled");  
-  u8g.drawStr(21,30, "Weather Station");
-  u8g.drawLine(0,40,128,40); 
-  u8g.drawStr(24,55, "by James Freeman");    
+  u8g2.setFont(u8g_font_profont12); 
+  u8g2.drawStr(7,10, "Joystick Controlled");  
+  u8g2.drawStr(21,30, "Weather Station");
+  u8g2.drawLine(0,40,128,40); 
+  u8g2.drawStr(24,55, "by James Freeman");    
 }
 /********************************************************/
 void resetFlags(){
@@ -2419,35 +2438,35 @@ void saveBackup(){
 /**********************************************************/
 void drawPressureGraph(){
   // draws skeleton graph
-   u8g.drawFrame(0,0,128,64);
-   u8g.drawLine(19,64,19,59);
-   u8g.drawLine(34,64,34,59);
-   u8g.drawLine(49,64,49,59);   
-   u8g.drawLine(64,64,64,54); // 12 hour mark
-   u8g.drawLine(79,64,79,59);    
-   u8g.drawLine(94,64,94,59);
-   u8g.drawLine(109,64,109,59);
+   u8g2.drawFrame(0,0,128,64);
+   u8g2.drawLine(19,64,19,59);
+   u8g2.drawLine(34,64,34,59);
+   u8g2.drawLine(49,64,49,59);   
+   u8g2.drawLine(64,64,64,54); // 12 hour mark
+   u8g2.drawLine(79,64,79,59);    
+   u8g2.drawLine(94,64,94,59);
+   u8g2.drawLine(109,64,109,59);
   // horizontal lines
    // the baseline is 900mb
    // the top line is 1020mb
-   u8g.drawLine(0,42,128,42); // 1000mb  
-   u8g.drawLine(0,21,128,21); // 1010mb 
+   u8g2.drawLine(0,42,128,42); // 1000mb  
+   u8g2.drawLine(0,21,128,21); // 1010mb 
 }
 /**********************************************************/
 void drawTemperatureGraph(){
   // draws skeleton graph
-  u8g.drawFrame(0,0,128,64);
-  u8g.drawLine(19,64,19,59);
-  u8g.drawLine(34,64,34,59);
-  u8g.drawLine(49,64,49,59);   
-  u8g.drawLine(64,64,64,54); // 12 hour mark
-  u8g.drawLine(79,64,79,59);    
-  u8g.drawLine(94,64,94,59);
-  u8g.drawLine(109,64,109,59);
+  u8g2.drawFrame(0,0,128,64);
+  u8g2.drawLine(19,64,19,59);
+  u8g2.drawLine(34,64,34,59);
+  u8g2.drawLine(49,64,49,59);   
+  u8g2.drawLine(64,64,64,54); // 12 hour mark
+  u8g2.drawLine(79,64,79,59);    
+  u8g2.drawLine(94,64,94,59);
+  u8g2.drawLine(109,64,109,59);
   // horizontal lines
-  u8g.drawLine(0,48,128,48); // 10 degrees C  
-  u8g.drawLine(0,32,128,32); // 20 degrees C 
-  u8g.drawLine(0,16,128,16); // 30 degrees C 
+  u8g2.drawLine(0,48,128,48); // 10 degrees C  
+  u8g2.drawLine(0,32,128,32); // 20 degrees C 
+  u8g2.drawLine(0,16,128,16); // 30 degrees C 
 }
 /**********************************************************/
 void buzzer(){
