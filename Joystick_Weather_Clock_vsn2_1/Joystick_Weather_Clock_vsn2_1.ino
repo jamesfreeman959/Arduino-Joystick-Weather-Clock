@@ -2,6 +2,11 @@
  *  
  * Adafruit_BMP280_Library v 2.0.1
  * DHT_sensor_library v1.3.8
+ * Wire - v1.0 - supplied with Arduino 1.8.10
+ * SPI - v1.0 - supplied with Arduino 1.8.10
+ * SD - v1.2.3 - supplied with Arduino 1.8.10 (From Sparkfun)
+ * RTClib v1.3.3 - by Adafruit, supplied via Arduino 1.8.10 library manager
+ * 
  */
 
 #include <Adafruit_BMP280.h>
@@ -16,6 +21,7 @@ Version History:
 Sept 2015 - first version
 February 2017 - version 2.0 added Humidity Sensor
 February 2017 - version 2.1 improved humidity function and corrected some code
+23rd Jan 2020 - version 2.2 - updated code to rely on native libraries availabile through Arduino 1.8.10 library manager, updated to work with BMP280, added support for Heat Index display on temperature screen
 
 Sketch updated February to include a Humidity Sensor DHT11 or DHT22
 A DS3231 RTC Chip should be used instead of the DS1307 to give better time stability
@@ -117,7 +123,7 @@ Small LED (green) to show backup data being saved to SD Card
 // Add libraries
 //  #include "BMP085.h"  // pressure sensor - this old library seems to work with the modern BMP280 (TBD - currently reports ok but no valid pressure data) - but has a hard coded address on the I2C bus of 0x77 - my sensor is 0x76 (found via I2C Scanner)
 //  #include <dht11.h> // Humidity Sensor
-  #include "I2Cdev.h" // needed with BMP085.h
+//  #include "I2Cdev.h" // needed with BMP085.h
   #include "RTClib.h"  // Real time clock
   #include <SD.h>  //SD Card
   #include <SPI.h> // used in SPI interface
@@ -1759,7 +1765,7 @@ void childDay(){
   String rhymePart1 = "";
   String rhymePart2 = "";
   String rhymePart3 = ""; 
-  switch(now.dayOfWeek()){ 
+  switch(now.dayOfTheWeek()){ 
     case 0:
       rhymePart1 = "The child born on the";
       rhymePart2 = "Sabbath is fair wise";     
@@ -1796,7 +1802,7 @@ void childDay(){
   const char*newRhyme3 = (const char*) rhymePart3.c_str();   
   u8g.drawStr(19,60, "English Rhyme 1838"); 
   u8g.setFont(u8g_font_profont12); 
-  if(now.dayOfWeek() == 0){ 
+  if(now.dayOfTheWeek() == 0){ 
     u8g.drawStr(1,15, newRhyme1);
     u8g.drawStr(1,30, newRhyme2); 
     u8g.drawStr(1,45, newRhyme3); 
