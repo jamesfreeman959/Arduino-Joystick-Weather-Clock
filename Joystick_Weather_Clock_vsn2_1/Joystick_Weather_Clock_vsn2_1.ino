@@ -140,11 +140,15 @@ Small LED (green) to show backup data being saved to SD Card
 // User can change the following  variables as required
 //
 // Alarm Clock
-  int alarmHour = 7; // default alarm hour
-  int alarmMinute = 30; // default alarm minute
-  int birthDay = 15; // your birthday
-  int birthMonth = 6; // your birthday
-  int maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59  
+// The below are all settings that must persist for the duration of the code run
+// They can't be lost when a routine exits (e.g. loop()) - thus they are either globals, or static
+// either way they exist in dynamic memory. However they all are values between 0 and 60 (at the maximum)
+// so should be byte, not int to save variable space.
+  byte alarmHour = 7; // default alarm hour
+  byte alarmMinute = 30; // default alarm minute
+  byte birthDay = 15; // your birthday
+  byte birthMonth = 6; // your birthday
+  byte maxAlarmTime = 10; //maximum time alarm sound for, seconds up to 59  
 //
 /**********************************************************************/
 // setup u8g object
@@ -155,38 +159,30 @@ Small LED (green) to show backup data being saved to SD Card
    * R0 is the original orientation of the v 2.1 code
    * R2 is rotate 180 degrees - upside down
    */
-  U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
 
 //
 // Hardware Error check
-  boolean errorHardware1 = false; // RealTime Clock
-  boolean errorHardware2 = false; // Pressure Sensor
-  boolean errorHardware3 = false; // Humidity Sensor
 //
 // setup DHT11 Humidity Sensor
   #define DHTTYPE DHT11
   #define DHTPIN 12
   DHT dht(DHTPIN, DHTTYPE);
-  
   //#define DHT11PIN 12
   //int checkDHT11; // used to confirm reading OK
-  double dewPointValue = 0;
-  float heatIndexValue = 0.0;
-  const char* greetingHumidity = "";
+  
+  const char* greetingHumidity = ""; // This is used in an ISR which can't be passed an argument - so it has to be global. Occupies 2 bytes at compile time.
+  // 26/01/20 - processed global vars to here - current compile uses 6053 bytes  
+
   boolean humidityUpdate = false; // shows if humidity was manually updated
   float humidityValue = 0.0;
   volatile int lastReading; // last time a Humidity reading was taken
   volatile int readingAge; // current minute
-  String thisDewPoint = "";
-  String thisHumidity = "";
   
 //
 // Setup RTC
   RTC_DS1307 RTC;
-  static String monthString[12]= {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-  String thisDay="";
-  String thisMonth = "";
-  String thisTime = ""; 
+  //static String monthString[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
   //String thisWeekday =""; // Not used anywhere in the code - saves 6 bytes of global memory removing
 //
 // setup BMP280
@@ -294,11 +290,12 @@ Small LED (green) to show backup data being saved to SD Card
   boolean rhymeFlag = false; // used to show day rhyme screen if true
   boolean rhymeMonthFlag = false; // used to show month rhyme if true
   int startDay = 0; // Sunday's value is 0, Saturday is 6
-  String week1 ="";
-  String week2 ="";
-  String week3 ="";
-  String week4 ="";
-  String week5 =""; 
+  //(below) 6302 with, 6272 without (6 bytes saved per var)
+  //String week1 ="";
+  //String week2 ="";
+  //String week3 ="";
+  //String week4 ="";
+  //String week5 =""; 
 //
 // moon phase
 //Defining these as globals variables in v2.2.1 code: 7268 bytes (88%)
@@ -406,6 +403,17 @@ const static unsigned char waxing_gibbous_bits[] PROGMEM = {
 /********************************************************/
 
 void setup(void) {  
+
+/*
+ * 
+ */
+  boolean errorHardware1 = false; // RealTime Clock
+  boolean errorHardware2 = false; // Pressure Sensor
+  boolean errorHardware3 = false; // Humidity Sensor
+
+  double dewPointValue;
+  float heatIndexValue = 0.0;
+
   // The buzzer will sound once with a pause then
   // three times if an SD card and DHT11  and BMP180 are present and working OK
   // 
@@ -414,6 +422,7 @@ void setup(void) {
   //
   pinMode(buzzerPin, OUTPUT); // output
   //
+  u8g2.begin();
   u8g2.firstPage(); 
   //u8g.setRot180();  // Fix if mounting the screen upside down - comment out or delete if not.
   do {
@@ -442,7 +451,8 @@ void setup(void) {
    readingAge = now.minute();
    errorHardware1 = false;   
   }    
-  Serial.println(barometer.begin(0x76) ? "BMP280 connection successful" : "BMP280 connection failed");
+  // Below statement had no F() in the print - 54 bytes of global variable space saved by adding in F()
+  Serial.println(barometer.begin(0x76) ? F("BMP280 connection successful") : F("BMP280 connection failed"));
   if(barometer.begin(0x76)){
     errorHardware2 = false;
   }
@@ -452,14 +462,16 @@ void setup(void) {
   //
   //check presence of DHT11
   dht.begin();
-  getHumidity(); // check the Humidity sensor
+  getHumidity(&errorHardware3, &dewPointValue, &heatIndexValue); // check the Humidity sensor
   if(errorHardware3 == false){
-    Serial.println("DHT11 reading OK");
+    //Below statement had no F() in the print - 18 bytes of global variable space saved by adding in F()
+    Serial.println(F("DHT11 reading OK"));
     lastReading = readingAge;
     buzzer();
   }
   else{
-    Serial.println("There is a problem with the DHT11 Humidity Sensor");
+    //Below statement had no F() in the print - 32 bytes of global variable space saved by adding in F()
+    Serial.println(F("There is a problem with the DHT11 Humidity Sensor"));
   }
   // led used to show backup being written
   pinMode(blueLed, OUTPUT);
@@ -573,7 +585,10 @@ void setup(void) {
 /*******************************************************/
 
 void loop() {
-  
+  boolean errorHardware3 = false;
+  double dewPointValue;
+  float heatIndexValue;
+
 //
 /* see which screen to display**************************/
 //
@@ -638,7 +653,7 @@ void loop() {
       // temperature display
      u8g2.firstPage();      
      do {
-       drawTemperature(); // draw temperature
+       drawTemperature(heatIndexValue); // draw temperature
      } while( u8g2.nextPage() ); 
      break; 
      //
@@ -766,7 +781,7 @@ void loop() {
       resetDataStrings();     
     }
     //
-    getHumidity(); // read the current value
+    getHumidity(&errorHardware3, &dewPointValue, &heatIndexValue); // read the current value
     lastReading = readingAge; // used in Humidity reading
     recordPointer = now.hour();
     recordDataTemp[0][recordPointer] = localTemp;
@@ -978,9 +993,21 @@ void drawAnalog(void) {  // draws an analog clock face
   }
 }
 
+// Saved 72 bytes of global memory by converting this Static to a function - to be tested 25/01/2020
+void getMonthString(String &strMonth, int numMonth) {
+  String monthString[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+
+  strMonth = monthString[numMonth];
+  
+}
+
 /*Screen 2 Digtal Clock****************************************/
 //
 void drawDigital(){
+  String thisDay="";
+  String thisMonth = "";
+  String thisTime = ""; 
+  
   // shows time in Digital Format  
   u8g2.setFont(u8g_font_profont12);
   String alarmSetTime = "Alarm set for ";
@@ -1018,7 +1045,8 @@ void drawDigital(){
     // display date at bottom of screen
     u8g2.setFont(u8g_font_profont15);
     thisDay = String(now.day(), DEC) + "/"; 
-    thisMonth=monthString[now.month()-1]; 
+    //thisMonth=monthString[now.month()-1]; 
+    getMonthString(thisMonth, now.month()-1);
     thisDay=thisDay + thisMonth + "/"; 
     thisDay=thisDay + String(now.year() , DEC);
     const char* newDay = (const char*) thisDay.c_str(); 
@@ -1417,7 +1445,7 @@ void getForecast(){
 }
 /*Screen 8 - Show temperature***********************************/
 //
-void drawTemperature(){
+void drawTemperature(float heatIndexValue){
   // displays local temperature
   //
   if(showC == 1){
@@ -1540,35 +1568,35 @@ void drawMoon(void){
   switch (mp){
     case 0:
       u8g2.drawStr(15,61, "  Full Moon  ");
-      u8g2.drawXBM(45,18,30,30,full_moon_bits);      
+      u8g2.drawXBMP(45,18,30,30,full_moon_bits);      
     break;
     case 1:
       u8g2.drawStr(15,61, "Waning Gibbous");
-      u8g2.drawXBM(45,18,30,30,waning_gibbous_bits);
+      u8g2.drawXBMP(45,18,30,30,waning_gibbous_bits);
     break;
     case 2:
       u8g2.drawStr(15,61, " Last Quarter ");
-      u8g2.drawXBM(45,18,30,30,last_quarter_bits);      
+      u8g2.drawXBMP(45,18,30,30,last_quarter_bits);      
     break;
     case 3:
       u8g2.drawStr(15,61, " Old Crescent ");
-      u8g2.drawXBM(45,18,30,30,crescent_old_bits);      
+      u8g2.drawXBMP(45,18,30,30,crescent_old_bits);      
     break;     
     case 4:
       u8g2.drawStr(15,61, "   New Moon   ");
-      u8g2.drawXBM(45,18,30,30,new_moon_bits);      
+      u8g2.drawXBMP(45,18,30,30,new_moon_bits);      
     break;  
     case 5:
       u8g2.drawStr(15,61, " New Crescent ");
-      u8g2.drawXBM(45,18,30,30,crescent_new_bits);      
+      u8g2.drawXBMP(45,18,30,30,crescent_new_bits);      
     break; 
     case 6:
       u8g2.drawStr(15,61, " First Quarter");
-      u8g2.drawXBM(45,18,30,30,first_quarter_bits);      
+      u8g2.drawXBMP(45,18,30,30,first_quarter_bits);      
     break;
     case 7:
       u8g2.drawStr(15,61, "Waxing Gibbous");
-      u8g2.drawXBM(45,18,30,30,waxing_gibbous_bits);      
+      u8g2.drawXBMP(45,18,30,30,waxing_gibbous_bits);      
     break;   
   }
  const char* newNfm = (const char*) nfm.c_str();  
@@ -1760,8 +1788,11 @@ void nameMoon(){
   DateTime now = RTC.now(); // get date
   //monthName = monthString[now.month()-1];      
   u8g2.setFont(u8g_font_profont22); 
-  const char* newMonthName = (const char*) monthString[now.month()-1].c_str();  
-  u8g2.drawStr(47,22, newMonthName);  
+  //const char* newMonthName = (const char*) monthString[now.month()-1].c_str();  
+  //u8g2.drawStr(47,22, newMonthName);  
+  String newMonthName;
+  getMonthString(newMonthName, now.month()-1);
+  u8g2.drawStr(47,22, (const char*) newMonthName.c_str());
   String dayNow = String(now.day());
   if (now.day() < 10){
     dayNow = "0" + dayNow;
@@ -1836,6 +1867,11 @@ void childDay(){
 //
  void drawCalendar(){
   // display a full month on a calendar 
+  String week1 ="";
+  String week2 ="";
+  String week3 ="";
+  String week4 ="";
+  String week5 =""; 
   int f = 0;
   u8g2.setFont(u8g_font_profont12);
   u8g2.drawStr(2,9, "Su Mo Tu We Th Fr Sa"); 
@@ -2036,9 +2072,17 @@ void monthRhyme(){
 /*Screen 13 - Humidity*******************************************************/
 //
 void drawHumidity(){
+  boolean errorHardware3 = false;
+  double dewPointValue = 0;
+  float heatIndexValue = 0.0;
+
+  String thisDewPoint = "";
+  String thisHumidity = "";
+
+  
   // displays local Humidity
   if(humidityUpdate == true){
-    getHumidity(); // update if the joystick was pressed
+    getHumidity(&errorHardware3, &dewPointValue, &heatIndexValue); // update if the joystick was pressed
     humidityUpdate = false;
   }
   u8g2.setFont(u8g_font_profont15);
@@ -2246,11 +2290,11 @@ void joySwitchISR(){
    pressure = barometer.readPressure();
  }
 /********************************************************/
-void getHumidity(){
+void getHumidity(boolean* errorHardware3, double* dewPointValue, float* heatIndexValue){
   // reads the DHT11, checks thst Sensor reading is OK. If not then returns errorHardware3 = true
    //checkDHT11 = DHT11.read(DHT11PIN);
    humidityValue = 0; // reset value
-   dewPointValue = 0;
+   //*dewPointValue = 0;
    // Code taken from DHTtester
    // Reading temperature or humidity takes about 250 milliseconds!
    // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
@@ -2262,8 +2306,10 @@ void getHumidity(){
 
    if (isnan(humidityValue) || isnan(t)) { // || isnan(f)) {
      //Serial.println(F("Failed to read from DHT sensor!"));
-     errorHardware3 = true;
+     *errorHardware3 = true;
      return;
+   } else {
+     *errorHardware3 = false;
    }
    //switch (checkDHT11)
    //{
@@ -2277,8 +2323,8 @@ void getHumidity(){
    //Serial.println(h);
    if(errorHardware3 == false){
     // only return a value if reading was good
-    dewPointValue = dewPoint(t, humidityValue);
-    heatIndexValue = dht.computeHeatIndex(t, humidityValue, false);
+    *dewPointValue = dewPoint(t, humidityValue);
+    *heatIndexValue = dht.computeHeatIndex(t, humidityValue, false);
    }
 }
 
@@ -2342,6 +2388,14 @@ void Write(){
   // data will be saved as a CSV file to enable it to be read into excel
   DateTime now = RTC.now();  
   // now append new data file 
+  /*
+  //6168
+  String temp2 = "0000/00/00";
+  char temp1[11];
+  temp2 = String(now.year()) + "/" + String(now.month()) + "/" + String(now.day());
+  temp2.toCharArray(temp1, 11);
+  ClockData.println(F(temp1));
+  */
   ClockData.println(String(now.year()) + "/" + String(now.month()) + "/" + String(now.day()));
   // now add this hours temperature and pressure strings
   ClockData.println("Temp(C)," + SDtemperature); // moves the data across to column 2
