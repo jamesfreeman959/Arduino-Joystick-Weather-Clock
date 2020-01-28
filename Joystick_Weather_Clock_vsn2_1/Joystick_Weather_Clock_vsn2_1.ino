@@ -7,12 +7,16 @@
  * SD - v1.2.3 - supplied with Arduino 1.8.10 (From Sparkfun)
  * RTClib v1.3.3 - by Adafruit, supplied via Arduino 1.8.10 library manager
  * u8g2 v2.26.14 - supplied with Arduino 1.8.10
+ * IRremote v2.2.3 - supplied with Arduino 1.8.10
+ * NMEAGPS (NeoGPS) v4.2.9 - supplied with Arduino 1.8.10
  * 
  */
 
 #include <Adafruit_BMP280.h>
 #include <DHT.h>
 #include <DHT_U.h>
+#include <IRremote.h>
+#include <NMEAGPS.h>
 
 /***********************************************************
 Joystick controlled Clock using OLED Display
@@ -25,6 +29,7 @@ February 2017 - version 2.1 improved humidity function and corrected some code
 23rd Jan 2020 - version 2.2 - updated code to rely on native libraries availabile through Arduino 1.8.10 library manager, updated to work with BMP280, added support for Heat Index display on temperature screen
 23rd Jan 2020 - version 2.2.1 - updated code to use u8g2 library - compiles but untested.
 23rd Jan 2020 - version 2.2.2 - audited global variables, removed redundant, moved moon phase graphics to PROGMEM
+28th Jan 2020 - version 2.3.0 - Too many changes to mention - IR Remote support added and basically working, localised a pile more global variables, switched from full to 2 page u8g2 buffering, added rudimentary GPS support (only polls the module - no time sync yet)
 
 Sketch updated February to include a Humidity Sensor DHT11 or DHT22
 A DS3231 RTC Chip should be used instead of the DS1307 to give better time stability
@@ -41,7 +46,7 @@ visit https://github.com/olikraus/u8g2 for full details of the U8G2 library and
 full instructions for use.
 
 Using a IIC 128x64 OLED with SSD1306 chip and RTC DS1307 
-
+h
 Font list for OLED display: https://github.com/olikraus/u8g2/wiki/fntlistall#30-pixel-height
 
 Connections: (All Pins are for the Arduino MEGA)
@@ -158,8 +163,18 @@ Small LED (green) to show backup data being saved to SD Card
    * See: https://github.com/olikraus/u8g2/wiki/u8g2reference#setdisplayrotation
    * R0 is the original orientation of the v 2.1 code
    * R2 is rotate 180 degrees - upside down
+   * 
+   * For the SSD1306 display connected to HW I2C, there are 3 possible libraries
+   * At the time of writing:
+   * one page (128 bytes), two pages (256 bytes) and a full frame buffer (1024 bytes).
+   * U8G2_SSD1306_128X64_NONAME_F_HW_I2C - fastest but uses most global memory: 6545 bytes (79%) - but not graphics artefacts.
+   * U8G2_SSD1306_128X64_NONAME_2_HW_I2C - middle of the road - more memory but less than "F" - 5777 bytes (70%) - display redraws are slow (but faster than _1_ with this library and the calendar screen doesn't fully render - they show but then the code skips ahead to the next screen - not sure why.
+   * U8G2_SSD1306_128X64_NONAME_1_HW_I2C - least memory but slowest - 5649 bytes (68%) - display redraws are slow with this library and complex screens (calendar and graphs) don't fully render - they show but then the code skips ahead to the next screen - not sure why.
+   * ref: https://github.com/olikraus/u8g2/issues/713
+   * 
    */
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
+//U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
+U8G2_SSD1306_128X64_NONAME_2_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
 
 //
 // Hardware Error check
@@ -188,21 +203,18 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
 // setup BMP280
   //BMP085 barometer;
   Adafruit_BMP280 barometer;
-  boolean grabFlag = false; // used to ensure only 1 reading is taken
-  float lastPressure1 = 0.00;
-  float lastPressure2 = 0.00; 
-  double localPressure = 0.00;
-  double localTemp = 0.00;
-  double localTempF = 0.00; // temp in Farenheit
-  boolean pascal = false; // flag to show if pascals should be shown
+  boolean pascal = false; // flag to show if pascals should be shown - must remain a global to work effectively
+
+  boolean grabFlag = false; // used to ensure only 1 reading is taken - must remain global as value needs to persist through each iteration of loop
+  double localPressure = 0.00; // These need to persist across loop runs to prevent us taking a reading every single iteration - must be global
+  double localTemp = 0.00; // These need to persist across loop runs to prevent us taking a reading every single iteration - must be global
+  
   float pressure;
   //boolean showC = true;  // if false show temp in Farenheit
   byte showC = 0;
   int showData = 1; // used to show data screen 1 = now, 2 = -24hrs, 3 = -48hrs
   boolean switchForecast = false; // if false then current forecast shown
   int temperature;
-  String thisPressure = "Waiting for Data";
-  String thisTemperature = "Waiting for Data";
   //
   // Data strings, used to store temperature and pressure for 48 hour
   //
@@ -214,18 +226,17 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
 //
 // SD Card
   File BackUp; // text file on SD card
-  int blueLed = 49; //LED used to show SD Card activity
+  const int blueLed = 49; //LED used to show SD Card activity
   File ClockData; // text file on SD Card
   boolean sdPresent = false; // flag to show data can be written to SD Card
-  String SDpressure = ""; // and this one with pressure  
-  String SDtemperature = ""; // build this string with current day temperature
+  String SDpressure = ""; // build string with current day pressures - easiest to keep this as a global to ensure the data remains consistent
+  String SDtemperature = ""; // build this string with current day temperature - easiest to keep this as a global to ensure the data remains consistent
 //
 //
 // Alarm Clock::
 //
   volatile boolean alarmSet = false; // flag to show an alarm has been set
   volatile boolean alarmSetMinutes = true;
-  String alarmThisTime = "";
   boolean setMinutes = true; // flag to show whether to set minutes or hours
   
 //
@@ -244,7 +255,6 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
   const static long interval PROGMEM = 1000; // This is used once in the code and treated as a constant - it's wasting global variable space by being here
   const char* newTimeTimer = "00:00";
   unsigned long previousMillis = 0;
-  String thisTimeTimer = "";
   int timerMins = 0;
   int timerSecs = 0;
 //
@@ -272,12 +282,9 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
   String longForecast = "";  // forecast based on last 2 hours
   String rise = "constant";
   float riseAmmount = 0; // ammount of rise or fall in mb
-  String thisForecast = ""; // forecast based on last hour
 //
 // analog and digital clock displays::
 //
-  const char* greetingTemp = "";
-  const char* greetingTime = "";
   volatile boolean timeAlarmSet = false;
 //
 // random number
@@ -297,6 +304,70 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
   //String week4 ="";
   //String week5 =""; 
 //
+
+// GPS
+  const int yellowLed = 47;
+  static NMEAGPS  gps; // This parses received characters
+
+//--------------------------
+// CHECK CONFIGURATION
+
+#if !defined(GPS_FIX_TIME) | !defined(GPS_FIX_DATE)
+  #error You must define GPS_FIX_TIME and DATE in GPSfix_cfg.h!
+#endif
+
+#if !defined(NMEAGPS_PARSE_RMC) & !defined(NMEAGPS_PARSE_ZDA)
+  #error You must define NMEAGPS_PARSE_RMC or ZDA in NMEAGPS_cfg.h!
+#endif
+
+#include <GPSport.h>
+
+static const int32_t          zone_hours   = 0L; // GMT - for example, EST = -5L
+static const int32_t          zone_minutes =  0L; // usually zero
+static const NeoGPS::clock_t  zone_offset  =
+                                zone_hours   * NeoGPS::SECONDS_PER_HOUR +
+                                zone_minutes * NeoGPS::SECONDS_PER_MINUTE;
+
+// Uncomment one DST changeover rule, or define your own:
+//#define USA_DST
+#define EU_DST
+
+#if defined(USA_DST)
+  static const uint8_t springMonth =  3;
+  static const uint8_t springDate  = 14; // latest 2nd Sunday
+  static const uint8_t springHour  =  2;
+  static const uint8_t fallMonth   = 11;
+  static const uint8_t fallDate    =  7; // latest 1st Sunday
+  static const uint8_t fallHour    =  2;
+  #define CALCULATE_DST
+
+#elif defined(EU_DST)
+  static const uint8_t springMonth =  3;
+  static const uint8_t springDate  = 31; // latest last Sunday
+  static const uint8_t springHour  =  1;
+  static const uint8_t fallMonth   = 10;
+  static const uint8_t fallDate    = 31; // latest last Sunday
+  static const uint8_t fallHour    =  1;
+  #define CALCULATE_DST
+#endif
+
+#ifdef NMEAGPS_INTERRUPT_PROCESSING
+  static void GPSisr( uint8_t c )
+  {
+    gps.handle( c );
+  }
+#endif
+
+//--------------------------
+
+// IR remote receiver
+const int RECV_PIN = 11;
+
+IRrecv irrecv(RECV_PIN);
+
+boolean irValid = false;
+
+
 // moon phase
 //Defining these as globals variables in v2.2.1 code: 7268 bytes (88%)
 //Defining these as PROGMEM constants in v2.2.1 code: 6308 bytes (77%)
@@ -424,12 +495,11 @@ void setup(void) {
   //
   u8g2.begin();
   u8g2.firstPage(); 
-  //u8g.setRot180();  // Fix if mounting the screen upside down - comment out or delete if not.
+  //u8g.setRot180();  // Fix if mounting the screen upside down - comment out or delete if not - u8g only
   do {
       splash(); 
     } while( u8g2.nextPage() );
   //  
-  RTC.begin();
   // following line sets the RTC to the date & time this sketch was compiled  
   // un REM the line below to set clock, then re REM it
   // and upload this sketch again
@@ -441,8 +511,15 @@ void setup(void) {
   //barometer.initialize();
   // verify connection
   Serial.println(F("Testing device connections..."));
+
+  if (! RTC.begin()) {
+    Serial.println(F("Couldn't find RTC device - check I2C bus and connections"));
+  } else {
+    Serial.println(F("RTC found"));
+  }
+
   if (! RTC.isrunning()) {
-   Serial.println(F("RTC is NOT running!"));
+   Serial.println(F("RTC is NOT running - note that if the battery fails, you will need to set the clock before it will run!"));
    errorHardware1 = true;    
   }
   else{
@@ -473,11 +550,27 @@ void setup(void) {
     //Below statement had no F() in the print - 32 bytes of global variable space saved by adding in F()
     Serial.println(F("There is a problem with the DHT11 Humidity Sensor"));
   }
+
+  Serial.println("Enabling IRin");
+  irrecv.enableIRIn(); // Start the receiver
+  Serial.println("Enabled IRin");
+  
   // led used to show backup being written
   pinMode(blueLed, OUTPUT);
   digitalWrite(blueLed, HIGH); // turn on LED
   delay(500); // test the blue led
   digitalWrite(blueLed, LOW); // turn it off
+
+  pinMode(yellowLed, OUTPUT);
+  digitalWrite(yellowLed, HIGH); // turn on LED
+  delay(500); // test the yellow led
+  digitalWrite(yellowLed, LOW); // turn it off
+
+  //GPS Setup
+  gpsPort.begin( 9600 );
+  #ifdef NMEAGPS_INTERRUPT_PROCESSING
+    gpsPort.attachInterrupt( GPSisr );
+  #endif
   //
   buzzer();  
   // 
@@ -559,9 +652,9 @@ void setup(void) {
   attachInterrupt(0,joySwitchISR,FALLING); // uses pin 2
   //
   // get temperature and pressure
-  getPressure(); // take a first reading 
-  localTemp= temperature;
-  localPressure = pressure; 
+  //getPressure(); // take a first reading 
+  //localTemp= temperature;
+  //localPressure = pressure; 
   //
   //
   // on board LED
@@ -588,175 +681,11 @@ void loop() {
   boolean errorHardware3 = false;
   double dewPointValue;
   float heatIndexValue;
+  
+  decode_results results;
 
-//
-/* see which screen to display**************************/
-//
-  switch (displayScreen){
-    case 0:
-      // draw an analog screen
-      u8g2.firstPage();
-      do {
-        drawAnalog(); 
-      } while( u8g2.nextPage() );
-      break;
-    // 
-    case 1:
-      // digital display
-     u8g2.firstPage();  
-     do {
-       drawDigital(); 
-     } while( u8g2.nextPage() );
-     break;
-    //
-    case 2:
-      // set Alarm display
-     u8g2.firstPage();  
-     do {
-       drawSetAlarm(); 
-     } while( u8g2.nextPage() );
-     break;     
-    //   
-    case 3:
-      // timer display
-     u8g2.firstPage();  
-     do {   
-       drawTimer(); 
-     } while( u8g2.nextPage() );
-     break;     
-    //
-    case 4:
-      // pressure display
-     u8g2.firstPage();      
-     do {
-       drawPressure(); // draw pressure
-     } while( u8g2.nextPage() ); 
-     break;
-     //
-     case 5:
-      // plot pressure display
-     u8g2.firstPage();     
-     do {
-       plotPressure(); // plot pressure
-     } while( u8g2.nextPage() );  
-     break;  
-     //
-     case 6:
-      // weather forcast display
-     u8g2.firstPage();      
-     do {
-       weatherForcast(); // weather forcast
-     } while( u8g2.nextPage() ); 
-     break;  
-     //   
-     case 7:
-      // temperature display
-     u8g2.firstPage();      
-     do {
-       drawTemperature(heatIndexValue); // draw temperature
-     } while( u8g2.nextPage() ); 
-     break; 
-     //
-     case 8:
-      // plot temperature display
-     u8g2.firstPage();      
-     do {
-       plotTemperature(); // draw temperature
-     } while( u8g2.nextPage() ); 
-     break;  
-     //
-     case 9:
-      // phase of the moon
-     u8g2.firstPage();      
-     do {
-       drawMoon(); // draw moon
-     } while( u8g2.nextPage() ); 
-     break;      
-     //
-     case 10:
-      // calendar display single day
-     u8g2.firstPage();      
-     do {
-       drawCalendar2(); 
-     } while( u8g2.nextPage() ); 
-     break;      
-     //
-     case 11:
-      // calendar display
-     u8g2.firstPage();      
-     do {
-       drawCalendar(); 
-     } while( u8g2.nextPage() ); 
-     break; 
-     //
-     case 12:
-      // humidity display
-     greetingTemp = "Click for update";
-     u8g2.firstPage();      
-     do {
-       drawHumidity(); 
-     } while( u8g2.nextPage() ); 
-     break;             
-  } // end of switch loop
- // 
- // check if additional screens have been selected
- //
-  if(displayScreen > 12){
-    switch(displayScreen){
-      case 13:
-        // show data from 24 hours ago
-        u8g2.firstPage();      
-        do {
-          plotPressure_24(); //  pressure data from 24 hours ago
-        } while( u8g2.nextPage() ); 
-      break;
-      case 14:
-        // show data from 36 hours ago
-        u8g2.firstPage();      
-        do {
-          plotPressure_48(); // pressure data from 48 hours ago
-        } while( u8g2.nextPage() ); 
-      break; 
-      // additional temperature screens
-      case 15:
-        // show data from 24 hours ago
-        u8g2.firstPage();      
-        do {
-          plotTemperature_24(); //  temperature data from 24 hours ago
-        } while( u8g2.nextPage() ); 
-      break;
-      case 16:
-        // show data from 36 hours ago
-        u8g2.firstPage();      
-        do {
-          plotTemperature_48(); // temperature data from 48 hours ago
-        } while( u8g2.nextPage() );   
-      break;  
-      case 17:
-       // name the moon for each momth
-        u8g2.firstPage();      
-        do {
-          nameMoon(); // names the full moon
-        } while( u8g2.nextPage() );     
-      break;
-      case 18:
-       // day rhyme
-        u8g2.firstPage();      
-        do {
-          childDay(); // rhyme for the day
-        } while( u8g2.nextPage() );     
-      break;    
-      case 19:
-       // month rhyme
-        u8g2.firstPage();      
-        do {
-          monthRhyme(); // rhyme for the month
-        } while( u8g2.nextPage() );     
-      break;        
-    
-    } // end of switch loop for additional screens
-  }   // end of additional screens                                      
- //
+//Serial.println(F("Loop!"));
+
  //
  /* get data and save data*******************************/
  // take a temperature/pressure reading once only every 10 seconds
@@ -853,58 +782,299 @@ void loop() {
 //
 /* read the joystick************************************/
 //
- // reset joystick
+/*
+ * Debounce routine - if the joystick is in the center zone (joyX is the center assuming the joystick is centered during power on (setup()) _
+ * Then if we detect that the joystick is in the center (i.e. the user has released it) and the last interrupt time was over 200ms ago
+ * we set xValid as a flag, meaning accept any input on the joystick. This fires regardless of what the IR receiver is doing as it has no knowledge
+ * of this, and is confusing matters - though only on slow redraws.
+ */
   if(analogRead(A0) > (joyX - 150) && analogRead(A0) < (joyX + 150)){
     interrupt_time1 = millis();
-    if (interrupt_time1 - last_interrupt_time1 >200) {  // debounce delay   
-      xValid = true;
-    }
-     last_interrupt_time1 = interrupt_time1;           
+//   if (interrupt_time1 - last_interrupt_time1 >200) {  // debounce delay   
+//     last_interrupt_time1 = interrupt_time1;
+//   }
+//      //xValid = true;
+//      if(analogRead(A0) > (joyX + 150)) { // Up with connections at bottom of joystick
+//        screenChange(1);
+//      } else if (analogRead(A0) < (joyX - 150)) {
+//        screenChange(0);
+//      }
+//    }
+                
+  } else if ((interrupt_time1 - last_interrupt_time1 >200) && (analogRead(A0) > (joyX + 150))) {
+    screenChange(1);
+    interrupt_time1 = millis();
+    last_interrupt_time1 = interrupt_time1;
+  } else if ((interrupt_time1 - last_interrupt_time1 >200) && (analogRead(A0) < (joyX - 150))) {
+    screenChange(0);
+    interrupt_time1 = millis();
+    last_interrupt_time1 = interrupt_time1;
   }
+
+/*
+ * A note on joystick orientation - this all depends upon how your module is supplied - mine has connections on the bottom edge so when mounted on 
+ * a breadboard, we see:
+ * Up = right
+ * Down = left
+ * 
+ * Ideally we might put some sort of constant in here to "rotate" the joystick, as we did for the display. For now it just serves to note this to save confusion over interpretting the code.
+ * There appears to be some code to take account of this ("output pins on left" vs "output pins on top" but I'm not clear on this - TBD).
+ */
+
+/*
+ * Read the IR remote receiver
+ */
+ if (irrecv.decode(&results)) {
+    Serial.print(F("IR command received: "));
+    Serial.println(results.value, HEX);
+    irrecv.resume(); // Receive the next value
+    //irValid = true;
+
+    if ( results.value == 0xFF38C7 ) {
+      buttonPress();
+    } else if ( results.value == 0xFF18E7 ) {
+      screenChange(1);
+    } else if ( results.value == 0xFF4AB5 ) {
+      screenChange(0);
+    }
+    
+ } else {
+    irValid = false;
+ }
+
+//if ( irValid == true && results.value == 0xFF38C7 ) {
+//  buttonPress();
+//  irValid = false;
+//}
+  
  // 
  // read joystick moving to right
-  if(xValid == true){ // allow reading to stabilise 
+//  if(xValid == true || irValid == true){ // allow reading to stabilise 
   // output pins on left
   //if(analogRead(A1) > (joyX + 150)) { 
-    if(analogRead(A0) < (joyX - 150)) {  // output pins on top  
-      greetingHumidity = "Click to Update";
-      xValid = false; // wait for the joystick to be released
-      // reset displayScreen if additional screens were selected
-      if(displayScreen == 12){
-        humidityUpdate = false;
-      }
-     if(displayScreen == 13 || displayScreen == 14){
-       displayScreen = 5;
-     }
-     if(displayScreen == 15 || displayScreen == 16){
-       displayScreen = 8;
-     }  
-     if(displayScreen == 17){
-       displayScreen = 9;
-     }  
-     if(displayScreen == 18){
-       displayScreen = 10; 
-     }  
-     if(displayScreen == 19){
-       displayScreen = 11; 
-     }         
-     //         
-      displayScreen = displayScreen + 1;
-      if(displayScreen > screenMax){
-        displayScreen = 0;      
-      }
-      resetFlags();     
-    }     
-  }   
+//    if(analogRead(A0) < (joyX - 150) || results.value == 0xFF4AB5) {  // output pins on top, and DOWN on remote
+
+//  }   
 //
 // read joystick moving to left
-  if(xValid == true){
+//  if(xValid == true || irValid == true){
     // output pins on left
     //if(analogRead(A1) < (joyX - 150)) { 
-    if(analogRead(A0) > (joyX + 150)) { // output pins on top 
-      xValid = false; // wait for the joystick to be released
+//    if(analogRead(A0) > (joyX + 150) || results.value == 0xFF18E7) { // output pins on top, and UP on remote
+
+//  }
+//} 
+
+/*
+ * GPS routine
+ */
+  GPSloop();
+
+  //
+/* see which screen to display**************************/
+//
+  switch (displayScreen){
+    case 0:
+      // draw an analog screen
+      u8g2.firstPage();
+      do {
+        drawAnalog(); 
+      } while( u8g2.nextPage() );
+      break;
+    // 
+    case 1:
+      // digital display
+     u8g2.firstPage();  
+     do {
+       drawDigital(); 
+     } while( u8g2.nextPage() );
+     break;
+    //
+    case 2:
+      // set Alarm display
+     u8g2.firstPage();  
+     do {
+       drawSetAlarm(); 
+     } while( u8g2.nextPage() );
+     break;     
+    //   
+    case 3:
+      // timer display
+     u8g2.firstPage();  
+     do {   
+       drawTimer(); 
+     } while( u8g2.nextPage() );
+     break;     
+    //
+    case 4:
+      // pressure display
+     u8g2.firstPage();      
+     do {
+       drawPressure(localPressure); // draw pressure
+     } while( u8g2.nextPage() ); 
+     break;
+     //
+     case 5:
+      // plot pressure display
+     u8g2.firstPage();     
+     do {
+       plotPressure(); // plot pressure
+     } while( u8g2.nextPage() );  
+     break;  
+     //
+     case 6:
+      // weather forcast display
+     u8g2.firstPage();      
+     do {
+       weatherForcast(localPressure); // weather forcast
+     } while( u8g2.nextPage() ); 
+     break;  
+     //   
+     case 7:
+      // temperature display
+     u8g2.firstPage();      
+     do {
+       //heatIndexValue is not a global variable any more, and won't be set at this point so we need to explicitly read it for drawTemperature to display it
+       getHumidity(&errorHardware3, &dewPointValue, &heatIndexValue); // read the current value
+       drawTemperature(heatIndexValue, localTemp); // draw temperature
+     } while( u8g2.nextPage() ); 
+     break; 
+     //
+     case 8:
+      // plot temperature display
+     u8g2.firstPage();      
+     do {
+       plotTemperature(); // draw temperature
+     } while( u8g2.nextPage() ); 
+     break;  
+     //
+     case 9:
+      // phase of the moon
+     u8g2.firstPage();      
+     do {
+       drawMoon(); // draw moon
+     } while( u8g2.nextPage() ); 
+     break;      
+     //
+     case 10:
+      // calendar display single day
+     u8g2.firstPage();      
+     do {
+       drawCalendar2(); 
+     } while( u8g2.nextPage() ); 
+     break;      
+     //
+     case 11:
+      // calendar display
+     u8g2.firstPage();      
+     do {
+       drawCalendar(); 
+     } while( u8g2.nextPage() ); 
+     break; 
+     //
+     case 12:
+      // humidity display
+     //greetingTemp = "Click for update";
+     u8g2.firstPage();      
+     do {
+       drawHumidity(); 
+     } while( u8g2.nextPage() ); 
+     break;             
+  } // end of switch loop
+ // 
+ // check if additional screens have been selected
+ //
+  if(displayScreen > 12){
+    switch(displayScreen){
+      case 13:
+        // show data from 24 hours ago
+        u8g2.firstPage();      
+        do {
+          plotPressure_24(); //  pressure data from 24 hours ago
+        } while( u8g2.nextPage() ); 
+      break;
+      case 14:
+        // show data from 36 hours ago
+        u8g2.firstPage();      
+        do {
+          plotPressure_48(); // pressure data from 48 hours ago
+        } while( u8g2.nextPage() ); 
+      break; 
+      // additional temperature screens
+      case 15:
+        // show data from 24 hours ago
+        u8g2.firstPage();      
+        do {
+          plotTemperature_24(); //  temperature data from 24 hours ago
+        } while( u8g2.nextPage() ); 
+      break;
+      case 16:
+        // show data from 36 hours ago
+        u8g2.firstPage();      
+        do {
+          plotTemperature_48(); // temperature data from 48 hours ago
+        } while( u8g2.nextPage() );   
+      break;  
+      case 17:
+       // name the moon for each momth
+        u8g2.firstPage();      
+        do {
+          nameMoon(); // names the full moon
+        } while( u8g2.nextPage() );     
+      break;
+      case 18:
+       // day rhyme
+        u8g2.firstPage();      
+        do {
+          childDay(); // rhyme for the day
+        } while( u8g2.nextPage() );     
+      break;    
+      case 19:
+       // month rhyme
+        u8g2.firstPage();      
+        do {
+          monthRhyme(); // rhyme for the month
+        } while( u8g2.nextPage() );     
+      break;        
+    
+    } // end of switch loop for additional screens
+  }   // end of additional screens                                      
+ //
+  
+} // end of the main loop
+
+void screenChange(byte direction) {
+  if ( direction == 0 ) {
+    greetingHumidity = "Click to Update";
+    // reset displayScreen if additional screens were selected
+    if(displayScreen == 12){
+      humidityUpdate = false;
+    }
+   if(displayScreen == 13 || displayScreen == 14){
+     displayScreen = 5;
+   }
+   if(displayScreen == 15 || displayScreen == 16){
+     displayScreen = 8;
+   }  
+   if(displayScreen == 17){
+     displayScreen = 9;
+   }  
+   if(displayScreen == 18){
+     displayScreen = 10; 
+   }  
+   if(displayScreen == 19){
+     displayScreen = 11; 
+   }         
+   //         
+    displayScreen = displayScreen + 1;
+    if(displayScreen > screenMax){
+      displayScreen = 0;      
+    }
+    resetFlags();  
+  } else if ( direction == 1) {
      // reset displayScreen if additional screens were selected
      greetingHumidity = "Click to Update";
+
      if(displayScreen == 13 || displayScreen == 14){
        displayScreen = 5;
      }
@@ -926,13 +1096,98 @@ void loop() {
        displayScreen = screenMax;
      }      
      resetFlags();
+  }
+
+}
+
+static void GPSloop()
+{  
+  static gps_fix  fix; // This contains all the parsed pieces
+
+  while (gps.available( gpsPort )) {
+    fix = gps.read();
+    // Display the local time
+
+    if (fix.valid.time && fix.valid.date) {
+      adjustTime( fix.dateTime );
+      digitalWrite(yellowLed, HIGH); // turn on LED
+  //    Serial.println(fix.dateTime);
+      Serial.println( F("Satellite Count:") );
+      Serial.println(fix.satellites);
+  /*    Serial.println( F("Latitude:") );
+      Serial.println(fix.latitude(), 6);
+      Serial.println( F("Longitude:") );
+      Serial.println(fix.longitude(), 6);
+      Serial.println( F("Speed MPH:") );
+      Serial.println(fix.speed_mph());
+      Serial.println( F("Altitude Feet:") );
+      Serial.println(fix.altitude() * 3.28084 ); // feet
+      Serial.println( F("Year:") );
+      Serial.println(fix.dateTime.year);
+      Serial.println( F("Month:") );
+      Serial.println(fix.dateTime.month);
+      Serial.println( F("Day:") );
+      Serial.println(fix.dateTime.day); */
+    } else {
+      digitalWrite(yellowLed, LOW); // turn on LED
     }
-  } 
-} // end of the main loop
+    Serial.print(F("."));
+  }
+
+} // GPSloop
+
+void adjustTime( NeoGPS::time_t & dt )
+{
+  NeoGPS::clock_t seconds = dt; // convert date/time structure to seconds
+
+  #ifdef CALCULATE_DST
+    //  Calculate DST changeover times once per reset and year!
+    static NeoGPS::time_t  changeover;
+    static NeoGPS::clock_t springForward, fallBack;
+
+    if ((springForward == 0) || (changeover.year != dt.year)) {
+
+      //  Calculate the spring changeover time (seconds)
+      changeover.year    = dt.year;
+      changeover.month   = springMonth;
+      changeover.date    = springDate;
+      changeover.hours   = springHour;
+      changeover.minutes = 0;
+      changeover.seconds = 0;
+      changeover.set_day();
+      // Step back to a Sunday, if day != SUNDAY
+      changeover.date -= (changeover.day - NeoGPS::time_t::SUNDAY);
+      springForward = (NeoGPS::clock_t) changeover;
+
+      //  Calculate the fall changeover time (seconds)
+      changeover.month   = fallMonth;
+      changeover.date    = fallDate;
+      changeover.hours   = fallHour - 1; // to account for the "apparent" DST +1
+      changeover.set_day();
+      // Step back to a Sunday, if day != SUNDAY
+      changeover.date -= (changeover.day - NeoGPS::time_t::SUNDAY);
+      fallBack = (NeoGPS::clock_t) changeover;
+    }
+  #endif
+
+  //  First, offset from UTC to the local timezone
+  seconds += zone_offset;
+
+  #ifdef CALCULATE_DST
+    //  Then add an hour if DST is in effect
+    if ((springForward <= seconds) && (seconds < fallBack))
+      seconds += NeoGPS::SECONDS_PER_HOUR;
+  #endif
+
+  dt = seconds; // convert seconds back to a date/time structure
+
+} // adjustTime
 
 /*Screen 1 - Analog Clock*************************************/
 //
 void drawAnalog(void) {  // draws an analog clock face
+  const char* greetingTime = "";
+  
   //
   DateTime now = RTC.now();
   //
@@ -1057,6 +1312,8 @@ void drawDigital(){
 //
 
  void drawSetAlarm(){
+  String alarmThisTime = "";
+
    // set the Alarm time 
    u8g2.setFont(u8g_font_profont15);
    u8g2.drawStr(15,10, "Set Alarm time:"); 
@@ -1128,6 +1385,8 @@ void drawDigital(){
 /*Screen 4 - Event Timer***************************************/
 //
 void drawTimer(){
+  String thisTimeTimer = "";
+  
   // count up timer, max 99 minutes  
   u8g2.setFont(u8g_font_profont15);
   u8g2.drawStr(45,10, "Timer:");  
@@ -1195,7 +1454,10 @@ void drawTimer(){
 
 /*Screen 5 - Show Pressure**************************************/
 //
-void drawPressure(){
+void drawPressure(double localPressure) {
+  String thisPressure = "Waiting for Data";
+
+  
   // displays current pressure in mb
   float tempReading = 0;
   u8g2.setFont(u8g_font_profont15);
@@ -1315,7 +1577,9 @@ void plotPressure_48(){
 }
 /*Screen 7 - Weather Forecast**********************************/
 //
-void weatherForcast(){
+void weatherForcast(double localPressure){
+  String thisForecast = ""; // forecast based on last hour
+
   /*
   Average sea level pressure is 1013mb
   
@@ -1327,7 +1591,7 @@ void weatherForcast(){
   Under 1009mb  Clearing, cooler    Precipitation    Storm
   */
   // uses pressure to forcast weather
-   getForecast(); // get new forecast 
+   getForecast(localPressure, &thisForecast); // get new forecast 
    u8g2.drawLine(0,50,128,50);    
    u8g2.setFont(u8g_font_profont12); 
    u8g2.drawStr(18,10, "Weather Forecast"); 
@@ -1367,12 +1631,16 @@ void weatherForcast(){
 }
 /* collect a forecast ******************************************/
 // allows a forecast to be collected without printing it
-void getForecast(){
+void getForecast(double localPressure, String* thisForecast){
+  
+  float lastPressure1 = 0.00;
+  float lastPressure2 = 0.00; 
+  
   // get the forecast
   // we need at least two readings to make a forecast
   // forecast will not be available until 0100 each day 
   if(recordNumber < 2){
-    thisForecast = "  Waiting for Data";
+    *thisForecast = "  Waiting for Data";
     longForecast = "  Waiting for Data"; 
   }    
   // if data available the show forecast
@@ -1389,25 +1657,25 @@ void getForecast(){
       rise = "falling "; 
       if ((lastPressure2 - lastPressure1) < 3){ // falling slowly
         if (lastPressure1 < 1009){
-          thisForecast = "Precipitation likely";   
+          *thisForecast = "Precipitation likely";   
         } 
         if(lastPressure1 > 1008 && lastPressure1 < 1020){
-          thisForecast = "    Little change";          
+          *thisForecast = "    Little change";          
          }
         if (lastPressure1 > 1019){  
-          thisForecast = "   Remaining Fair";          
+          *thisForecast = "   Remaining Fair";          
         }         
       }
    //   
       if((lastPressure2 - lastPressure1) > 2){ // falling more rapidly 
         if (lastPressure1 < 1009){         
-          thisForecast = "   Stormy weather";           
+          *thisForecast = "   Stormy weather";           
         }
         if (lastPressure1 > 1008 && lastPressure1 <1020){        
-          thisForecast = "Precipitation likely";          
+          *thisForecast = "Precipitation likely";          
         } 
         if (lastPressure1 >1019){        
-          thisForecast = "    Cloudy, warmer";          
+          *thisForecast = "    Cloudy, warmer";          
         }        
       }     
     }
@@ -1415,26 +1683,26 @@ void getForecast(){
     if(lastPressure1 == lastPressure2){   // pressure is constant 
       rise = "constant ";
       if (lastPressure1 < 1009) {
-        thisForecast = "   Clearing, cooler";        
+        *thisForecast = "   Clearing, cooler";        
       }
       if(lastPressure1 >1008 and lastPressure1 <1020){
-        thisForecast = " Continuing the same";        
+        *thisForecast = " Continuing the same";        
       } 
       if(lastPressure1 > 1019){
-        thisForecast = "   Remaining Fair";        
+        *thisForecast = "   Remaining Fair";        
       }     
     }
     //
     if(lastPressure1 > lastPressure2){ // pressure is rising 
       rise = "rising ";  
       if (lastPressure1 < 1009) {
-        thisForecast = "Clearing but cooler";        
+        *thisForecast = "Clearing but cooler";        
       }
       if(lastPressure1 > 1008 and lastPressure1 <1020){
-        thisForecast = " Little or no change";     
+        *thisForecast = " Little or no change";     
       } 
       if(lastPressure1 > 1019){
-        thisForecast = "   Remaining Fair";        
+        *thisForecast = "   Remaining Fair";        
       }   
     }
     lastPressure1 = lastPressure1 *100;
@@ -1445,7 +1713,13 @@ void getForecast(){
 }
 /*Screen 8 - Show temperature***********************************/
 //
-void drawTemperature(float heatIndexValue){
+void drawTemperature(float heatIndexValue, double localTemp){
+  const char* greetingTemp = "";
+
+  String thisTemperature = "Waiting for Data";
+  double localTempF = 0.00; // temp in Farenheit
+
+
   // displays local temperature
   //
   if(showC == 1){
@@ -2161,14 +2435,12 @@ int j = 0;
      }     
    }    
  }
-/**************************************************************/ 
-void joySwitchISR(){
-  // includes a debounce routine
-  static unsigned long last_interrupt_time = 0;
-  unsigned long interrupt_time = millis();
-  //Serial.println(displayScreen); // Un REM to debug
-  if (interrupt_time - last_interrupt_time >500) { 
-    if (displayScreen == 0 || displayScreen == 1){
+
+/*
+ * 
+ */
+void buttonPress() {
+  if (displayScreen == 0 || displayScreen == 1){
       timeAlarmSet = !timeAlarmSet; // change alarm state
     }
     //
@@ -2266,8 +2538,18 @@ void joySwitchISR(){
       humidityUpdate = true;
       greetingHumidity = "Reading updated";
       lastReading = readingAge;
-    }
-  } 
+    } 
+}
+ 
+/**************************************************************/ 
+void joySwitchISR(){
+  // includes a debounce routine
+  static unsigned long last_interrupt_time = 0;
+  unsigned long interrupt_time = millis();
+  //Serial.println(displayScreen); // Un REM to debug
+  if (interrupt_time - last_interrupt_time >500) { 
+    buttonPress();
+  }
   last_interrupt_time = interrupt_time;
 }
 /********************************************************/
@@ -2305,7 +2587,7 @@ void getHumidity(boolean* errorHardware3, double* dewPointValue, float* heatInde
    //float f = dht.readTemperature(true);
 
    if (isnan(humidityValue) || isnan(t)) { // || isnan(f)) {
-     //Serial.println(F("Failed to read from DHT sensor!"));
+     Serial.println(F("Failed to read from DHT sensor!"));
      *errorHardware3 = true;
      return;
    } else {
@@ -2320,8 +2602,8 @@ void getHumidity(boolean* errorHardware3, double* dewPointValue, float* heatInde
    //  default: errorHardware3 = true; break;
    //}
    //Serial.print(F("DHT11 return value was: "));
-   //Serial.println(h);
-   if(errorHardware3 == false){
+   //Serial.println(humidityValue);
+   if(*errorHardware3 == false){
     // only return a value if reading was good
     *dewPointValue = dewPoint(t, humidityValue);
     *heatIndexValue = dht.computeHeatIndex(t, humidityValue, false);
@@ -2381,7 +2663,7 @@ void resetFlags(){
   moonName = false; // reset the moon screen to graphic display
   rhymeFlag = false; // reset to page calendar 
   rhymeMonthFlag = false; // reset to calendar
-  pascal = false; // show mb if false   
+  //pascal = false; // show mb if false   
 }
 /********************************************************/
 void Write(){

@@ -25,6 +25,8 @@ static void print_int(unsigned long val, unsigned long invalid, int len);
 static void print_date(TinyGPS &gps);
 static void print_str(const char *str, int len);
 
+const int yellowLED = 47;
+
 void setup()
 {
   Serial.begin(9600);
@@ -38,6 +40,10 @@ void setup()
   Serial.println("Sats HDOP Latitude Longitude Fix  Date       Time       Date Alt     Course Speed Card  Distance Course Card  Chars Sentences Checksum");
   Serial.println("          (deg)    (deg)     Age                        Age  (m)     --- from GPS ----  ---- to London  ----  RX    RX        Fail");
   Serial.println("--------------------------------------------------------------------------------------------------------------------------------------");
+
+  // Test the yellow LED
+  pinMode(yellowLED, OUTPUT);
+  digitalWrite(yellowLED, HIGH); // turn on
 }
 
 void loop()
