@@ -789,24 +789,15 @@ void loop() {
  * of this, and is confusing matters - though only on slow redraws.
  */
   if(analogRead(A0) > (joyX - 150) && analogRead(A0) < (joyX + 150)){
-    interrupt_time1 = millis();
-//   if (interrupt_time1 - last_interrupt_time1 >200) {  // debounce delay   
-//     last_interrupt_time1 = interrupt_time1;
-//   }
-//      //xValid = true;
-//      if(analogRead(A0) > (joyX + 150)) { // Up with connections at bottom of joystick
-//        screenChange(1);
-//      } else if (analogRead(A0) < (joyX - 150)) {
-//        screenChange(0);
-//      }
-//    }
-                
+    interrupt_time1 = millis();              
   } else if ((interrupt_time1 - last_interrupt_time1 >200) && (analogRead(A0) > (joyX + 150))) {
     screenChange(1);
+    // Reset the debounce timer to the current millis value (time since Arduino board started) - both values have to be set equal, and to the current value of millis for this to work
     interrupt_time1 = millis();
     last_interrupt_time1 = interrupt_time1;
   } else if ((interrupt_time1 - last_interrupt_time1 >200) && (analogRead(A0) < (joyX - 150))) {
     screenChange(0);
+    // Reset the debounce timer to the current millis value (time since Arduino board started) - both values have to be set equal, and to the current value of millis for this to work
     interrupt_time1 = millis();
     last_interrupt_time1 = interrupt_time1;
   }
@@ -841,29 +832,6 @@ void loop() {
  } else {
     irValid = false;
  }
-
-//if ( irValid == true && results.value == 0xFF38C7 ) {
-//  buttonPress();
-//  irValid = false;
-//}
-  
- // 
- // read joystick moving to right
-//  if(xValid == true || irValid == true){ // allow reading to stabilise 
-  // output pins on left
-  //if(analogRead(A1) > (joyX + 150)) { 
-//    if(analogRead(A0) < (joyX - 150) || results.value == 0xFF4AB5) {  // output pins on top, and DOWN on remote
-
-//  }   
-//
-// read joystick moving to left
-//  if(xValid == true || irValid == true){
-    // output pins on left
-    //if(analogRead(A1) < (joyX - 150)) { 
-//    if(analogRead(A0) > (joyX + 150) || results.value == 0xFF18E7) { // output pins on top, and UP on remote
-
-//  }
-//} 
 
 /*
  * GPS routine
