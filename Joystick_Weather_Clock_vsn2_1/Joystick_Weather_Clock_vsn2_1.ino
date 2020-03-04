@@ -30,6 +30,10 @@ February 2017 - version 2.1 improved humidity function and corrected some code
 23rd Jan 2020 - version 2.2.1 - updated code to use u8g2 library - compiles but untested.
 23rd Jan 2020 - version 2.2.2 - audited global variables, removed redundant, moved moon phase graphics to PROGMEM
 28th Jan 2020 - version 2.3.0 - Too many changes to mention - IR Remote support added and basically working, localised a pile more global variables, switched from full to 2 page u8g2 buffering, added rudimentary GPS support (only polls the module - no time sync yet)
+4th Mar 2020 - version 2.3.1 - GPS time sync (hopefully with working DST calculation - to be tested). Also fixed the timer which seemed to be crashing as a result of a global variable change.
+4th Mar 2020 - version 2.3.2 - Fixed backup.dat writing - perhaps because of the SD library update, it was appending to the file rather than truncating, meaning the load routine was broken. Now working. Could be improved by checking the last write date - the current routine assumes the data was written today so is suitable for quick restarts but not longer power outages.
+4th Mar 2020 - version 2.3.3 - Changes format of data.csv - given the lack of readln/writeln for SD card files on an Arduino, and the limited memory, seeking is difficult and cumberson and the old routine was writing 24 sets of data for a day, with lots of blank values for the hours not yet past. The new fomat lends itself better to Arduino and just does one row per hour with the columns being timestamp, temp and pressure. This could be improved to add humidity and any other hourly data.
+4th Mar 2020 - version 2.3.4 - Fixed dew point reading on Humidity screen that got broken previously.
 
 Sketch updated February to include a Humidity Sensor DHT11 or DHT22
 A DS3231 RTC Chip should be used instead of the DS1307 to give better time stability
@@ -191,6 +195,7 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
 
   boolean humidityUpdate = false; // shows if humidity was manually updated
   float humidityValue = 0.0;
+  double dewPointValue = 0.0;
   volatile int lastReading; // last time a Humidity reading was taken
   volatile int readingAge; // current minute
   
@@ -257,6 +262,7 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
   unsigned long previousMillis = 0;
   int timerMins = 0;
   int timerSecs = 0;
+  String thisTimeTimer = "";
 //
 // Alarm Buzzer::
 //
@@ -308,7 +314,6 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
 // GPS
   const int yellowLed = 47;
   static NMEAGPS  gps; // This parses received characters
-
 //--------------------------
 // CHECK CONFIGURATION
 
@@ -482,7 +487,6 @@ void setup(void) {
   boolean errorHardware2 = false; // Pressure Sensor
   boolean errorHardware3 = false; // Humidity Sensor
 
-  double dewPointValue;
   float heatIndexValue = 0.0;
 
   // The buzzer will sound once with a pause then
@@ -539,7 +543,7 @@ void setup(void) {
   //
   //check presence of DHT11
   dht.begin();
-  getHumidity(&errorHardware3, &dewPointValue, &heatIndexValue); // check the Humidity sensor
+  getHumidity(&errorHardware3, &heatIndexValue); // check the Humidity sensor
   if(errorHardware3 == false){
     //Below statement had no F() in the print - 18 bytes of global variable space saved by adding in F()
     Serial.println(F("DHT11 reading OK"));
@@ -600,7 +604,8 @@ void setup(void) {
      // If the file was created ok then add come content
       if (ClockData){
         ClockData.println(F("Joystick Weather Clock Data"));
-        ClockData.println(F("Date,00:00,01:00,02:00,03:00,04:00,05:00,06:00,07:00,08:00,09:00,10:00,11:00,12:00,13:00,14:00,15:00,16:00,17:00,18:00,19:00,20:00,21:00,22:00,23:00,Time (hrs)"));
+        //ClockData.println(F("Date,00:00,01:00,02:00,03:00,04:00,05:00,06:00,07:00,08:00,09:00,10:00,11:00,12:00,13:00,14:00,15:00,16:00,17:00,18:00,19:00,20:00,21:00,22:00,23:00,Time (hrs)"));
+        ClockData.println(F("Timestamp,Temp (C),Pressure(mb)"));
         // Close the file
         ClockData.close();
         sdPresent = true; // show card can be used 
@@ -633,8 +638,9 @@ void setup(void) {
         }
        } 
      else{ // create new backup.dat and fill with blank data
-       Serial.println(F("Creating backup.dat"));    
-       BackUp = SD.open("backup.dat", FILE_WRITE);
+       Serial.println(F("Creating backup.dat"));
+       // We must open this file and truncate it - otherwise we just keep appending....    
+       BackUp = SD.open("backup.dat", O_WRITE | O_CREAT | O_TRUNC);
        for(int f = 0; f < 6;f++){
          BackUp.print(F("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\r\n"));
        }
@@ -679,7 +685,6 @@ void setup(void) {
 
 void loop() {
   boolean errorHardware3 = false;
-  double dewPointValue;
   float heatIndexValue;
   
   decode_results results;
@@ -710,7 +715,7 @@ void loop() {
       resetDataStrings();     
     }
     //
-    getHumidity(&errorHardware3, &dewPointValue, &heatIndexValue); // read the current value
+    getHumidity(&errorHardware3, &heatIndexValue); // read the current value
     lastReading = readingAge; // used in Humidity reading
     recordPointer = now.hour();
     recordDataTemp[0][recordPointer] = localTemp;
@@ -725,13 +730,13 @@ void loop() {
     // the backup data will then be reloaded.  
     if(SD.exists("data.csv")){ 
       ClockData = SD.open("data.csv", FILE_WRITE);
-      Write(); // send data to SD Card if there is one present 
+      Write(recordDataTemp[0][recordPointer], recordDataPressure[0][recordPointer]); // send data to SD Card if there is one present 
       ClockData.close(); // close the file    
     }
   //}
     if(SD.exists("backup.dat")){ 
-      BackUp = SD.open("backup.dat", FILE_WRITE);
-      BackUp.seek(0); // rewind
+      BackUp = SD.open("backup.dat", O_WRITE | O_CREAT | O_TRUNC); //Truncate the file and start a fresh write - the backup should never append, but should always contain just the last 3 days of data (as defined by the array size)
+      //BackUp.seek(0); // rewind
       digitalWrite(blueLed, HIGH); // turn on LED to show backup being written
       saveBackup(); // now save the backup file
       digitalWrite(blueLed, LOW); // turn it off      
@@ -836,7 +841,15 @@ void loop() {
 /*
  * GPS routine
  */
-  GPSloop();
+
+//
+// Run the GPS loop, but only set the flag to set the time once an hour to save over-frequent RTC updates
+//
+  if(now.minute() == 0 && now.second() == 0  && doOnce == false){  
+    GPSloop(true);
+  } else {
+    GPSloop(false);
+  }
 
   //
 /* see which screen to display**************************/
@@ -903,7 +916,7 @@ void loop() {
      u8g2.firstPage();      
      do {
        //heatIndexValue is not a global variable any more, and won't be set at this point so we need to explicitly read it for drawTemperature to display it
-       getHumidity(&errorHardware3, &dewPointValue, &heatIndexValue); // read the current value
+       getHumidity(&errorHardware3, &heatIndexValue); // read the current value
        drawTemperature(heatIndexValue, localTemp); // draw temperature
      } while( u8g2.nextPage() ); 
      break; 
@@ -1068,7 +1081,7 @@ void screenChange(byte direction) {
 
 }
 
-static void GPSloop()
+static void GPSloop(boolean setRTC)
 {  
   static gps_fix  fix; // This contains all the parsed pieces
 
@@ -1082,20 +1095,12 @@ static void GPSloop()
   //    Serial.println(fix.dateTime);
       Serial.println( F("Satellite Count:") );
       Serial.println(fix.satellites);
-  /*    Serial.println( F("Latitude:") );
-      Serial.println(fix.latitude(), 6);
-      Serial.println( F("Longitude:") );
-      Serial.println(fix.longitude(), 6);
-      Serial.println( F("Speed MPH:") );
-      Serial.println(fix.speed_mph());
-      Serial.println( F("Altitude Feet:") );
-      Serial.println(fix.altitude() * 3.28084 ); // feet
-      Serial.println( F("Year:") );
-      Serial.println(fix.dateTime.year);
-      Serial.println( F("Month:") );
-      Serial.println(fix.dateTime.month);
-      Serial.println( F("Day:") );
-      Serial.println(fix.dateTime.day); */
+
+      // Set the RTC from the GPS (TO DO - make this less frequent)
+      if (setRTC) {
+        RTC.adjust(DateTime(uint16_t(fix.dateTime.year),uint8_t(fix.dateTime.month),uint8_t(fix.dateTime.day),uint8_t(fix.dateTime.hours),uint8_t(fix.dateTime.minutes),uint8_t(fix.dateTime.seconds)));
+      }
+
     } else {
       digitalWrite(yellowLed, LOW); // turn on LED
     }
@@ -1353,7 +1358,7 @@ void drawDigital(){
 /*Screen 4 - Event Timer***************************************/
 //
 void drawTimer(){
-  String thisTimeTimer = "";
+  
   
   // count up timer, max 99 minutes  
   u8g2.setFont(u8g_font_profont15);
@@ -2315,7 +2320,6 @@ void monthRhyme(){
 //
 void drawHumidity(){
   boolean errorHardware3 = false;
-  double dewPointValue = 0;
   float heatIndexValue = 0.0;
 
   String thisDewPoint = "";
@@ -2324,7 +2328,8 @@ void drawHumidity(){
   
   // displays local Humidity
   if(humidityUpdate == true){
-    getHumidity(&errorHardware3, &dewPointValue, &heatIndexValue); // update if the joystick was pressed
+    getHumidity(&errorHardware3, &heatIndexValue); // update if the joystick was pressed
+    Serial.println(dewPointValue);
     humidityUpdate = false;
   }
   u8g2.setFont(u8g_font_profont15);
@@ -2342,9 +2347,9 @@ void drawHumidity(){
     u8g2.setFont(u8g_font_profont12);
     u8g2.drawStr(100,20, "Dew");
     u8g2.drawStr(95,30, "Point");
-    thisDewPoint = String(dewPointValue) +  "\260C";
+    thisDewPoint = String(dewPointValue,1) +  "\260C";
     const char* newDewPoint = (const char*) thisDewPoint.c_str();
-    u8g2.drawStr(100,43,  newDewPoint);
+    u8g2.drawStr(90,43,  newDewPoint);
     //
     // show age of reading
     if((readingAge - lastReading) == 0){
@@ -2540,11 +2545,11 @@ void joySwitchISR(){
    pressure = barometer.readPressure();
  }
 /********************************************************/
-void getHumidity(boolean* errorHardware3, double* dewPointValue, float* heatIndexValue){
+void getHumidity(boolean* errorHardware3, float* heatIndexValue){
   // reads the DHT11, checks thst Sensor reading is OK. If not then returns errorHardware3 = true
    //checkDHT11 = DHT11.read(DHT11PIN);
    humidityValue = 0; // reset value
-   //*dewPointValue = 0;
+   dewPointValue = 0;
    // Code taken from DHTtester
    // Reading temperature or humidity takes about 250 milliseconds!
    // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
@@ -2573,7 +2578,7 @@ void getHumidity(boolean* errorHardware3, double* dewPointValue, float* heatInde
    //Serial.println(humidityValue);
    if(*errorHardware3 == false){
     // only return a value if reading was good
-    *dewPointValue = dewPoint(t, humidityValue);
+    dewPointValue = dewPoint(t, humidityValue);
     *heatIndexValue = dht.computeHeatIndex(t, humidityValue, false);
    }
 }
@@ -2634,7 +2639,7 @@ void resetFlags(){
   //pascal = false; // show mb if false   
 }
 /********************************************************/
-void Write(){
+void Write(float saveTemp, float savePress){
   // data will be saved as a CSV file to enable it to be read into excel
   DateTime now = RTC.now();  
   // now append new data file 
@@ -2646,10 +2651,10 @@ void Write(){
   temp2.toCharArray(temp1, 11);
   ClockData.println(F(temp1));
   */
-  ClockData.println(String(now.year()) + "/" + String(now.month()) + "/" + String(now.day()));
+  ClockData.println(String(now.year()) + "/" + String(now.month()) + "/" + String(now.day()) + " " + String(now.hour()) + ":" + String(now.minute()) +":" + String(now.second()) + "," + saveTemp + "," + savePress);
   // now add this hours temperature and pressure strings
-  ClockData.println("Temp(C)," + SDtemperature); // moves the data across to column 2
-  ClockData.println("Press(mb)," + SDpressure);     
+  //ClockData.println("Temp(C)," + SDtemperature); // moves the data across to column 2
+  //ClockData.println("Press(mb)," + SDpressure);     
 }
 /********************************************************/
 size_t readField(File* file, char* str, size_t size, char* delim) {
@@ -2672,7 +2677,7 @@ size_t readField(File* file, char* str, size_t size, char* delim) {
 //
  void loadBackup(){ 
    //float array[6][25];// Array for data.
-   BackUp = SD.open("backup.dat", FILE_WRITE);
+   BackUp = SD.open("backup.dat", FILE_READ);
    BackUp.seek(0); // rewind for read  
    int p = 0;     // First array index.
    int q = 0;     // Second array index
@@ -2682,6 +2687,7 @@ size_t readField(File* file, char* str, size_t size, char* delim) {
    DateTime now = RTC.now();  // read the RTC 
    recordPointer = now.hour(); 
    // Read the file and store the data.
+   Serial.println(F("Entering loadBackup routine..."));
    for (p = 0; p < 6; p++) {
      for (q = 0; q < 25; q++) { 
         n = readField(&BackUp, str, sizeof(str), ",\n");   
