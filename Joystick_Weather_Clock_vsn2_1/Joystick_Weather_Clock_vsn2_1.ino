@@ -363,6 +363,9 @@ static const NeoGPS::clock_t  zone_offset  =
   }
 #endif
 
+static gps_fix  fix; // This contains all the parsed pieces
+boolean setRTC;
+
 //--------------------------
 
 // IR remote receiver
@@ -679,6 +682,9 @@ void setup(void) {
     Serial.println(F(""));
   }
   //
+
+  setRTC = true;
+  
   displayScreen = 0; // reset to home screen 
 } 
 /*******************************************************/
@@ -747,7 +753,21 @@ void loop() {
       Serial.println(F("SD Card not present, or files missing"));   
     }
     doOnce = true; // stop the temperature being read again in second = 0
-  }
+
+    
+    /*
+     * GPS routine
+     */
+    // This can't exist outside this loop as doOnce is transient within this tight chunk of code - using doOnce elsewhere in the loop
+    // causes the RTC to never get set. We know this block works, so once per hour as well as writing data, we'll fire the GPS loop
+    // and tell it to set the RTC 
+    Serial.println(F("Calling GPSloop with true"));
+    setRTC = true;
+
+  } 
+
+  GPSloop();
+
   //
   if(now.minute() == 0 && now.second() > 0 && doOnce == true){ 
     doOnce = false; // reset the flag
@@ -837,19 +857,6 @@ void loop() {
  } else {
     irValid = false;
  }
-
-/*
- * GPS routine
- */
-
-//
-// Run the GPS loop, but only set the flag to set the time once an hour to save over-frequent RTC updates
-//
-  if(now.minute() == 0 && now.second() == 0  && doOnce == false){  
-    GPSloop(true);
-  } else {
-    GPSloop(false);
-  }
 
   //
 /* see which screen to display**************************/
@@ -1081,24 +1088,26 @@ void screenChange(byte direction) {
 
 }
 
-static void GPSloop(boolean setRTC)
+static void GPSloop()
 {  
-  static gps_fix  fix; // This contains all the parsed pieces
-
   while (gps.available( gpsPort )) {
     fix = gps.read();
     // Display the local time
 
     if (fix.valid.time && fix.valid.date) {
+
       adjustTime( fix.dateTime );
+
       digitalWrite(yellowLed, HIGH); // turn on LED
   //    Serial.println(fix.dateTime);
-      Serial.println( F("Satellite Count:") );
-      Serial.println(fix.satellites);
+      //Serial.println( F("Satellite Count:") );
+      //Serial.println(fix.satellites);
 
       // Set the RTC from the GPS (TO DO - make this less frequent)
       if (setRTC) {
+        Serial.println(F("Setting the RTC from GPS..."));
         RTC.adjust(DateTime(uint16_t(fix.dateTime.year),uint8_t(fix.dateTime.month),uint8_t(fix.dateTime.day),uint8_t(fix.dateTime.hours),uint8_t(fix.dateTime.minutes),uint8_t(fix.dateTime.seconds)));
+        setRTC = false;
       }
 
     } else {
@@ -1112,7 +1121,6 @@ static void GPSloop(boolean setRTC)
 void adjustTime( NeoGPS::time_t & dt )
 {
   NeoGPS::clock_t seconds = dt; // convert date/time structure to seconds
-
   #ifdef CALCULATE_DST
     //  Calculate DST changeover times once per reset and year!
     static NeoGPS::time_t  changeover;
@@ -1153,7 +1161,6 @@ void adjustTime( NeoGPS::time_t & dt )
   #endif
 
   dt = seconds; // convert seconds back to a date/time structure
-
 } // adjustTime
 
 /*Screen 1 - Analog Clock*************************************/
