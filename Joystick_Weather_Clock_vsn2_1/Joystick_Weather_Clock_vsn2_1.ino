@@ -1106,7 +1106,7 @@ static void GPSloop()
       // Set the RTC from the GPS (TO DO - make this less frequent)
       if (setRTC) {
         Serial.println(F("Setting the RTC from GPS..."));
-        RTC.adjust(DateTime(uint16_t(fix.dateTime.year),uint8_t(fix.dateTime.month),uint8_t(fix.dateTime.day),uint8_t(fix.dateTime.hours),uint8_t(fix.dateTime.minutes),uint8_t(fix.dateTime.seconds)));
+        RTC.adjust(DateTime(uint16_t(fix.dateTime.year),uint8_t(fix.dateTime.month),uint8_t(fix.dateTime.date),uint8_t(fix.dateTime.hours),uint8_t(fix.dateTime.minutes),uint8_t(fix.dateTime.seconds)));
         setRTC = false;
       }
 
